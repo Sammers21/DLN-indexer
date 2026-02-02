@@ -32,34 +32,49 @@ export class Indexer {
     private readonly solana: SolanaClient;
     private readonly checkpointStore: CheckpointStore;
     private readonly analytics: Analytics;
+    private readonly kind: OrderKind;
+    private readonly programId: PublicKey;
+    private readonly programType: ProgramType;
+    private readonly eventParser: EventParser;
+    private readonly eventName: string;
+    private checkpoint: Checkpoint | null = null;
     private running = false;
     constructor(
         solana: SolanaClient,
         checkpointStore: CheckpointStore,
-        analytics: Analytics
+        analytics: Analytics,
+        kind: OrderKind
     ) {
         this.solana = solana;
         this.checkpointStore = checkpointStore;
         this.analytics = analytics;
+        this.kind = kind;
+        this.programId = kind === "OrderCreated" ? DLN_SRC : DLN_DST;
+        this.programType = kind === "OrderCreated" ? "src" : "dst";
+        this.eventParser = kind === "OrderCreated" ? srcEventParser : dstEventParser;
+        this.eventName = kind === "OrderCreated" ? "CreatedOrder" : "Fulfilled";
     }
-    async startIndexing(kind: OrderKind, checkpoint: Checkpoint | null): Promise<void> {
-        const programId = kind === "OrderCreated" ? DLN_SRC : DLN_DST;
-        const programType: ProgramType = kind === "OrderCreated" ? "src" : "dst";
-        const eventParser = kind === "OrderCreated" ? srcEventParser : dstEventParser;
-        const eventName = kind === "OrderCreated" ? "CreatedOrder" : "Fulfilled";
-        let lastSignature = checkpoint?.lastSignature ?? null;
+    getCheckpoint(): Checkpoint | null {
+        return this.checkpoint;
+    }
+    async startIndexing(): Promise<void> {
+        this.checkpoint = await this.checkpointStore.getCheckpoint(this.programType);
         this.running = true;
         logger.info({
-            kind,
-            lastSignature: checkpoint?.lastSignature ?? "none",
-            blockTime: checkpoint ? formatTime(checkpoint.blockTime) : "none",
+            kind: this.kind,
+            lastSignature: this.checkpoint?.lastSignature ?? "none",
+            blockTime: this.checkpoint ? formatTime(this.checkpoint.blockTime) : "none",
         }, "Starting indexing");
         while (this.running) {
             try {
                 // Fetch signatures after the checkpoint (newest first)
-                const signatures = await this.fetchSignatures(programId, lastSignature, config.indexer.batchSize);
+                const signatures = await this.fetchSignatures(
+                    this.programId,
+                    this.checkpoint?.lastSignature ?? null,
+                    config.indexer.batchSize
+                );
                 if (signatures.length === 0) {
-                    logger.debug({ kind }, "No new signatures, waiting...");
+                    logger.debug({ kind: this.kind }, "No new signatures, waiting...");
                     await this.sleep(config.indexer.delayMs);
                     continue;
                 }
@@ -76,7 +91,7 @@ export class Indexer {
                 for (const sigInfo of validSigs) {
                     const tx = await this.solana.getTransaction(sigInfo.signature);
                     if (!tx) continue;
-                    const orders = this.parseTransactionLogs(tx, sigInfo, eventParser, eventName, kind);
+                    const orders = this.parseTransactionLogs(tx, sigInfo);
                     allOrders.push(...orders);
                     latestSigInfo = sigInfo;
                 }
@@ -87,7 +102,7 @@ export class Indexer {
                         logger.info({
                             signature: order.signature,
                             orderId: order.orderId,
-                            kind,
+                            kind: this.kind,
                             usdValue: order.usdValue,
                             time: formatTime(order.time),
                         }, "Order indexed");
@@ -95,31 +110,32 @@ export class Indexer {
                 }
                 // Update checkpoint to the last processed signature
                 if (latestSigInfo) {
-                    lastSignature = latestSigInfo.signature;
                     const checkpointTime = latestSigInfo.blockTime ?? Math.floor(Date.now() / 1000);
-                    await this.checkpointStore.setCheckpoint(programType, {
+                    this.checkpoint = {
                         lastSignature: latestSigInfo.signature,
                         blockTime: checkpointTime,
-                    });
+                    };
+                    await this.checkpointStore.setCheckpoint(this.programType, this.checkpoint);
                     logger.info({
-                        kind,
+                        kind: this.kind,
                         processed: allOrders.length,
-                        checkpointSignature: latestSigInfo.signature,
+                        checkpointSignature: this.checkpoint.lastSignature,
                         checkpointTime: formatTime(checkpointTime),
                     }, "Batch processed, checkpoint saved");
+                    await this.sleep(config.indexer.delayMs);
                 } else {
-                    logger.info({ kind, processed: 0 }, "Batch processed, no new orders");
+                    logger.info({ kind: this.kind, processed: 0 }, "Batch processed, no new orders, sleeping 10s...");
+                    await this.sleep(10000);
                 }
-                await this.sleep(config.indexer.delayMs);
             } catch (err) {
-                logger.error({ err, kind }, "Error during indexing, retrying...");
+                logger.error({ err, kind: this.kind }, "Error during indexing, retrying...");
                 await this.sleep(config.indexer.delayMs * 2);
             }
         }
     }
     stop(): void {
         this.running = false;
-        logger.info("Indexer stopping");
+        logger.info({ kind: this.kind }, "Indexer stopping");
     }
     private async fetchSignatures(
         programId: PublicKey,
@@ -134,17 +150,14 @@ export class Indexer {
     }
     private parseTransactionLogs(
         tx: VersionedTransactionResponse,
-        sigInfo: ConfirmedSignatureInfo,
-        eventParser: EventParser,
-        eventName: string,
-        kind: OrderKind
+        sigInfo: ConfirmedSignatureInfo
     ): Order[] {
         const orders: Order[] = [];
         if (!tx.meta?.logMessages) return orders;
         try {
-            const events = eventParser.parseLogs(tx.meta.logMessages);
+            const events = this.eventParser.parseLogs(tx.meta.logMessages);
             for (const event of events) {
-                if (event.name === eventName) {
+                if (event.name === this.eventName) {
                     const data = event.data as { orderId: number[] };
                     const orderId = Buffer.from(data.orderId).toString("hex");
                     orders.push({
@@ -152,7 +165,7 @@ export class Indexer {
                         signature: sigInfo.signature,
                         time: sigInfo.blockTime ?? Math.floor(Date.now() / 1000),
                         usdValue: 0, // TODO: calculate USD value
-                        kind,
+                        kind: this.kind,
                     });
                 }
             }

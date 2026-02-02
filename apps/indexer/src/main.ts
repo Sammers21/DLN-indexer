@@ -11,22 +11,21 @@ async function main(): Promise<void> {
   const solana = new SolanaClient();
   const checkpointStore: CheckpointStore = new RedisCheckpointStore(config.redis.url);
   const analytics: Analytics = new ClickHouseAnalytics(config.clickhouse.host);
-  const indexer = new Indexer(solana, checkpointStore, analytics);
+  // Create two indexer instances, one for each order kind
+  const srcIndexer = new Indexer(solana, checkpointStore, analytics, "OrderCreated");
+  const dstIndexer = new Indexer(solana, checkpointStore, analytics, "OrderFulfilled");
   async function shutdown(code: number): Promise<void> {
-    indexer.stop();
+    srcIndexer.stop();
+    dstIndexer.stop();
     await Promise.all([analytics.close(), checkpointStore.close()]);
     process.exit(code);
   }
   process.on("SIGINT", () => shutdown(0));
   process.on("SIGTERM", () => shutdown(0));
   try {
-    const [srcCheckpoint, dstCheckpoint] = await Promise.all([
-      checkpointStore.getCheckpoint("src"),
-      checkpointStore.getCheckpoint("dst"),
-    ]);
     // Start both indexers in parallel (they run indefinitely)
-    const srcIndexing = indexer.startIndexing("OrderCreated", srcCheckpoint);
-    const dstIndexing = indexer.startIndexing("OrderFulfilled", dstCheckpoint);
+    const srcIndexing = srcIndexer.startIndexing();
+    const dstIndexing = dstIndexer.startIndexing();
     // Monitor progress
     const monitor = async (): Promise<void> => {
       while (true) {

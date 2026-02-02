@@ -3,6 +3,7 @@ export type ProgramType = "src" | "dst";
 export interface Checkpoint {
     lastSignature: string;
     blockTime: number;
+    blockTimeFormatted?: string;
 }
 
 export interface CheckpointStore {

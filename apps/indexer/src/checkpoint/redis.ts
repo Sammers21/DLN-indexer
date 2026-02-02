@@ -22,8 +22,20 @@ export class RedisCheckpointStore implements CheckpointStore {
         }
     }
     async setCheckpoint(program: ProgramType, checkpoint: Checkpoint): Promise<void> {
-        await this.redis.set(`${this.prefix}${program}`, JSON.stringify(checkpoint));
-        logger.debug({ program, checkpoint }, "Checkpoint saved");
+        const data = {
+            ...checkpoint,
+            blockTimeFormatted: new Date(checkpoint.blockTime * 1000).toLocaleString("en-US", {
+                year: "numeric",
+                month: "short",
+                day: "2-digit",
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+                hour12: false,
+            }),
+        };
+        await this.redis.set(`${this.prefix}${program}`, JSON.stringify(data));
+        logger.debug({ program, checkpoint: data }, "Checkpoint saved");
     }
     async close(): Promise<void> {
         await this.redis.quit();
