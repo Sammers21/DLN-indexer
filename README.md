@@ -133,12 +133,12 @@ dln-indexer/
 ├── apps/
 │   ├── indexer/             # Solana transaction indexer
 │   │   └── src/
-│   │       ├── index.ts     # Main entry point
+│   │       ├── main.ts      # Main entry point
 │   │       ├── fetcher.ts   # RPC transaction fetching
 │   │       └── parser.ts    # DLN event parsing
 │   ├── api/                 # Fastify REST API
 │   │   └── src/
-│   │       ├── server.ts    # API server
+│   │       ├── main.ts      # API server
 │   │       └── routes/      # API routes
 │   └── dashboard/           # React + Vite dashboard
 │       └── src/

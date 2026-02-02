@@ -30,13 +30,13 @@ dln-indexer/
 ├── apps/
 │   ├── indexer/              # Blockchain indexer
 │   │   ├── src/
-│   │   │   ├── index.ts      # Entry point - orchestrates indexing
+│   │   │   ├── main.ts       # Entry point - orchestrates indexing
 │   │   │   ├── fetcher.ts    # Solana RPC communication
 │   │   │   └── parser.ts     # DLN event parsing (Borsh/Anchor)
 │   │   └── test/
 │   ├── api/                  # REST API server
 │   │   ├── src/
-│   │   │   ├── server.ts     # Fastify server setup
+│   │   │   ├── main.ts       # Fastify server setup
 │   │   │   └── routes/       # API route handlers
 │   │   └── test/
 │   └── dashboard/            # React frontend
