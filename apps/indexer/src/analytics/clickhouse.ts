@@ -15,21 +15,21 @@ export class ClickHouseAnalytics implements Analytics {
         });
         logger.info("ClickHouse client initialized");
     }
-    async insertOrder(order: Order): Promise<void> {
+    async insertOrders(orders: Order[]): Promise<void> {
+        if (orders.length === 0) return;
+        const values = orders.map((order) => ({
+            order_id: order.orderId,
+            tx_signature: order.signature,
+            block_time: new Date(order.time * 1000).toISOString().slice(0, 19),
+            usd_value: order.usdValue,
+            event_type: order.kind === "OrderCreated" ? "created" : "fulfilled",
+        }));
         await this.client.insert({
             table: "dln.orders",
-            values: [
-                {
-                    order_id: order.orderId,
-                    tx_signature: order.signature,
-                    block_time: new Date(order.time * 1000).toISOString().slice(0, 19),
-                    usd_value: order.usdValue,
-                    event_type: order.kind === "OrderCreated" ? "created" : "fulfilled",
-                },
-            ],
+            values,
             format: "JSONEachRow",
         });
-        logger.debug({ orderId: order.orderId, kind: order.kind }, "Order inserted");
+        logger.debug({ count: orders.length }, "Orders inserted");
     }
     async getOrderCount(kind: OrderKind): Promise<number> {
         const eventType = kind === "OrderCreated" ? "created" : "fulfilled";

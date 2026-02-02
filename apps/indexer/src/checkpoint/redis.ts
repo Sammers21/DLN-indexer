@@ -7,8 +7,8 @@ const logger = createLogger("redis");
 export class RedisCheckpointStore implements CheckpointStore {
     private readonly redis: Redis;
     private readonly prefix = "indexer:checkpoint:";
-    constructor(url: string) {
-        this.redis = new Redis(url);
+    constructor(url?: string) {
+        this.redis = new Redis(url ?? config.redis.url);
         this.redis.on("connect", () => logger.info("Redis connected"));
         this.redis.on("error", (err) => logger.error({ err }, "Redis error"));
     }

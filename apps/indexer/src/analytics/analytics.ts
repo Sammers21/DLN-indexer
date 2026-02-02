@@ -9,7 +9,7 @@ export interface Order {
 }
 
 export interface Analytics {
-    insertOrder(order: Order): Promise<void>;
+    insertOrders(orders: Order[]): Promise<void>;
     getOrderCount(kind: OrderKind): Promise<number>;
     close(): Promise<void>;
 }
