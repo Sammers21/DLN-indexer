@@ -80,10 +80,13 @@ export async function setCachedPrice(
 export async function getCachedPrices(
   tokenAddresses: string[],
 ): Promise<Map<string, number | null>> {
+  const result = new Map<string, number | null>();
+  if (tokenAddresses.length === 0) {
+    return result;
+  }
   const r = getRedisClient();
   const keys = tokenAddresses.map((addr) => `${PRICE_PREFIX}${addr}`);
   const values = await r.mget(...keys);
-  const result = new Map<string, number | null>();
   tokenAddresses.forEach((addr, i) => {
     const val = values[i];
     result.set(addr, val ? parseFloat(val) : null);

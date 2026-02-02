@@ -35,7 +35,7 @@ export async function insertOrders(orders: Order[]): Promise<void> {
     order_id: order.order_id,
     event_type: order.event_type,
     tx_signature: order.tx_signature,
-    slot: order.slot,
+    slot: order.slot.toString(),
     block_time: order.block_time.toISOString(),
     give_chain_id: order.give_chain_id || null,
     give_token_address: order.give_token_address || null,

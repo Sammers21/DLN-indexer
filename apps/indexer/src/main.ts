@@ -3,9 +3,9 @@ import {
   createLogger,
   getCheckpoint,
   setCheckpoint,
-  closeRedisClient,
   insertOrders,
   closeClickHouseClient,
+  closeRedisClient,
   enrichOrdersWithPrices,
   type Order,
 } from "@dln/shared";
@@ -20,6 +20,13 @@ interface IndexerStats {
   createdOrders: number;
   fulfilledOrders: number;
   errors: number;
+}
+
+function dropStorageConnections(): Promise<void> {
+  return Promise.all([
+    closeClickHouseClient(),
+    closeRedisClient()
+  ]).then(() => { });
 }
 
 async function indexProgram(
@@ -133,22 +140,19 @@ async function main(): Promise<void> {
     logger.error({ err }, "Fatal error during indexing");
     process.exit(1);
   } finally {
-    await closeRedisClient();
-    await closeClickHouseClient();
+    await dropStorageConnections();
   }
 }
 
 process.on("SIGINT", async () => {
   logger.info("Received SIGINT, shutting down");
-  await closeRedisClient();
-  await closeClickHouseClient();
+  await dropStorageConnections();
   process.exit(0);
 });
 
 process.on("SIGTERM", async () => {
   logger.info("Received SIGTERM, shutting down");
-  await closeRedisClient();
-  await closeClickHouseClient();
+  await dropStorageConnections();
   process.exit(0);
 });
 
@@ -156,3 +160,5 @@ main().catch((err) => {
   logger.error({ err }, "Unhandled error");
   process.exit(1);
 });
+
+
