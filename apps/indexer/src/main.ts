@@ -41,8 +41,8 @@ async function main(): Promise<void> {
     // while indexing is running, check if we have reached the target event counts
     while (true) {
       const [created, fulfilled] = await Promise.all([
-        analytics.getEventCount("OrderCreated"),
-        analytics.getEventCount("OrderFulfilled"),
+        analytics.getOrderCount("OrderCreated"),
+        analytics.getOrderCount("OrderFulfilled"),
       ]);
       if (created >= 25000 && fulfilled >= 25000) {
         logger.info({ created, fulfilled }, "DLN Indexer has reached the target event counts. Stopping...");

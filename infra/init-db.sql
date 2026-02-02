@@ -3,25 +3,12 @@ CREATE DATABASE IF NOT EXISTS dln;
 
 -- Orders table with ReplacingMergeTree for deduplication
 CREATE TABLE IF NOT EXISTS dln.orders (
-  order_id FixedString(64),           -- 32-byte hex
-  event_type LowCardinality(String),  -- 'created' or 'fulfilled'
+  order_id String,
   tx_signature String,
-  slot UInt64,
-  block_time DateTime64(3),
-  -- For created orders:
-  give_chain_id Nullable(String),
-  give_token_address Nullable(String),
-  give_amount Nullable(String),       -- Store as string to handle large numbers
-  take_chain_id Nullable(String),
-  take_token_address Nullable(String),
-  take_amount Nullable(String),
-  maker Nullable(String),
-  -- For fulfilled:
-  taker Nullable(String),
-  -- USD conversion:
-  give_amount_usd Nullable(Float64),
-  take_amount_usd Nullable(Float64),
-  created_at DateTime64(3) DEFAULT now64(3)
+  block_time DateTime,
+  usd_value Float64,
+  event_type LowCardinality(String),  -- 'created' or 'fulfilled'
+  created_at DateTime DEFAULT now()
 )
 ENGINE = ReplacingMergeTree(created_at)
 PARTITION BY toYYYYMM(block_time)
@@ -37,7 +24,7 @@ AS SELECT
   toDate(block_time) AS date,
   event_type,
   count() AS order_count,
-  sum(give_amount_usd) AS volume_usd
+  sum(usd_value) AS volume_usd
 FROM dln.orders
 GROUP BY date, event_type;
 
