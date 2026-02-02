@@ -1,5 +1,9 @@
-import { FastifyInstance, FastifyRequest } from 'fastify';
-import { getDailyVolumes, getVolumeSummary, type VolumesResponse } from '@dln/shared';
+import { FastifyInstance, FastifyRequest } from "fastify";
+import {
+  getDailyVolumes,
+  getVolumeSummary,
+  type VolumesResponse,
+} from "@dln/shared";
 
 interface VolumesQuerystring {
   start_date?: string;
@@ -8,19 +12,21 @@ interface VolumesQuerystring {
 
 export async function volumesRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get<{ Querystring: VolumesQuerystring }>(
-    '/volumes',
+    "/volumes",
     {
       schema: {
         querystring: {
-          type: 'object',
+          type: "object",
           properties: {
-            start_date: { type: 'string' },
-            end_date: { type: 'string' },
+            start_date: { type: "string" },
+            end_date: { type: "string" },
           },
         },
       },
     },
-    async (request: FastifyRequest<{ Querystring: VolumesQuerystring }>): Promise<VolumesResponse> => {
+    async (
+      request: FastifyRequest<{ Querystring: VolumesQuerystring }>,
+    ): Promise<VolumesResponse> => {
       const { start_date, end_date } = request.query;
       const [volumes, summary] = await Promise.all([
         getDailyVolumes({ startDate: start_date, endDate: end_date }),
@@ -30,27 +36,36 @@ export async function volumesRoutes(fastify: FastifyInstance): Promise<void> {
         volumes,
         summary,
       };
-    }
+    },
   );
   fastify.get<{ Querystring: VolumesQuerystring }>(
-    '/volumes/daily',
+    "/volumes/daily",
     {
       schema: {
         querystring: {
-          type: 'object',
+          type: "object",
           properties: {
-            start_date: { type: 'string' },
-            end_date: { type: 'string' },
+            start_date: { type: "string" },
+            end_date: { type: "string" },
           },
         },
       },
     },
     async (request: FastifyRequest<{ Querystring: VolumesQuerystring }>) => {
       const { start_date, end_date } = request.query;
-      const volumes = await getDailyVolumes({ startDate: start_date, endDate: end_date });
+      const volumes = await getDailyVolumes({
+        startDate: start_date,
+        endDate: end_date,
+      });
       const byDate = new Map<
         string,
-        { date: string; created_volume: number; fulfilled_volume: number; created_count: number; fulfilled_count: number }
+        {
+          date: string;
+          created_volume: number;
+          fulfilled_volume: number;
+          created_count: number;
+          fulfilled_count: number;
+        }
       >();
       for (const vol of volumes) {
         const existing = byDate.get(vol.date) || {
@@ -60,7 +75,7 @@ export async function volumesRoutes(fastify: FastifyInstance): Promise<void> {
           created_count: 0,
           fulfilled_count: 0,
         };
-        if (vol.event_type === 'created') {
+        if (vol.event_type === "created") {
           existing.created_volume = vol.volume_usd;
           existing.created_count = vol.order_count;
         } else {
@@ -69,18 +84,20 @@ export async function volumesRoutes(fastify: FastifyInstance): Promise<void> {
         }
         byDate.set(vol.date, existing);
       }
-      return Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));
-    }
+      return Array.from(byDate.values()).sort((a, b) =>
+        a.date.localeCompare(b.date),
+      );
+    },
   );
   fastify.get<{ Querystring: VolumesQuerystring }>(
-    '/volumes/summary',
+    "/volumes/summary",
     {
       schema: {
         querystring: {
-          type: 'object',
+          type: "object",
           properties: {
-            start_date: { type: 'string' },
-            end_date: { type: 'string' },
+            start_date: { type: "string" },
+            end_date: { type: "string" },
           },
         },
       },
@@ -88,6 +105,6 @@ export async function volumesRoutes(fastify: FastifyInstance): Promise<void> {
     async (request: FastifyRequest<{ Querystring: VolumesQuerystring }>) => {
       const { start_date, end_date } = request.query;
       return getVolumeSummary({ startDate: start_date, endDate: end_date });
-    }
+    },
   );
 }

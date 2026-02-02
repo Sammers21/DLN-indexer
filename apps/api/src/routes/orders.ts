@@ -1,5 +1,5 @@
-import { FastifyInstance, FastifyRequest } from 'fastify';
-import { getOrders, type OrdersResponse } from '@dln/shared';
+import { FastifyInstance, FastifyRequest } from "fastify";
+import { getOrders, type OrdersResponse } from "@dln/shared";
 
 interface OrdersQuerystring {
   page?: string;
@@ -11,25 +11,27 @@ interface OrdersQuerystring {
 
 export async function ordersRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get<{ Querystring: OrdersQuerystring }>(
-    '/orders',
+    "/orders",
     {
       schema: {
         querystring: {
-          type: 'object',
+          type: "object",
           properties: {
-            page: { type: 'string' },
-            limit: { type: 'string' },
-            event_type: { type: 'string', enum: ['created', 'fulfilled'] },
-            start_date: { type: 'string' },
-            end_date: { type: 'string' },
+            page: { type: "string" },
+            limit: { type: "string" },
+            event_type: { type: "string", enum: ["created", "fulfilled"] },
+            start_date: { type: "string" },
+            end_date: { type: "string" },
           },
         },
       },
     },
-    async (request: FastifyRequest<{ Querystring: OrdersQuerystring }>): Promise<OrdersResponse> => {
+    async (
+      request: FastifyRequest<{ Querystring: OrdersQuerystring }>,
+    ): Promise<OrdersResponse> => {
       const { page, limit, event_type, start_date, end_date } = request.query;
-      const pageNum = Math.max(1, parseInt(page || '1', 10));
-      const limitNum = Math.min(100, Math.max(1, parseInt(limit || '50', 10)));
+      const pageNum = Math.max(1, parseInt(page || "1", 10));
+      const limitNum = Math.min(100, Math.max(1, parseInt(limit || "50", 10)));
       const { orders, total } = await getOrders({
         page: pageNum,
         limit: limitNum,
@@ -43,18 +45,18 @@ export async function ordersRoutes(fastify: FastifyInstance): Promise<void> {
         page: pageNum,
         limit: limitNum,
       };
-    }
+    },
   );
   fastify.get<{ Params: { orderId: string } }>(
-    '/orders/:orderId',
+    "/orders/:orderId",
     {
       schema: {
         params: {
-          type: 'object',
+          type: "object",
           properties: {
-            orderId: { type: 'string' },
+            orderId: { type: "string" },
           },
-          required: ['orderId'],
+          required: ["orderId"],
         },
       },
     },
@@ -66,9 +68,9 @@ export async function ordersRoutes(fastify: FastifyInstance): Promise<void> {
       });
       const order = orders.find((o) => o.order_id === orderId);
       if (!order) {
-        return reply.status(404).send({ error: 'Order not found' });
+        return reply.status(404).send({ error: "Order not found" });
       }
       return order;
-    }
+    },
   );
 }

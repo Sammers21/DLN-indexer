@@ -3,17 +3,17 @@ import {
   PublicKey,
   ConfirmedSignatureInfo,
   ParsedTransactionWithMeta,
-} from '@solana/web3.js';
-import { config, createLogger } from '@dln/shared';
+} from "@solana/web3.js";
+import { config, createLogger } from "@dln/shared";
 
-const logger = createLogger('fetcher');
+const logger = createLogger("fetcher");
 
 let connection: Connection | null = null;
 
 export function getConnection(): Connection {
   if (!connection) {
     connection = new Connection(config.solana.rpcUrl, {
-      commitment: 'confirmed',
+      commitment: "confirmed",
       fetch: (url, options) => {
         return fetch(url, {
           ...options,
@@ -22,7 +22,10 @@ export function getConnection(): Connection {
         });
       },
     });
-    logger.info({ rpcUrl: config.solana.rpcUrl }, 'Solana connection initialized');
+    logger.info(
+      { rpcUrl: config.solana.rpcUrl },
+      "Solana connection initialized",
+    );
   }
   return connection;
 }
@@ -35,7 +38,7 @@ export interface FetchSignaturesOptions {
 }
 
 export async function fetchSignatures(
-  options: FetchSignaturesOptions
+  options: FetchSignaturesOptions,
 ): Promise<ConfirmedSignatureInfo[]> {
   const conn = getConnection();
   const programPubkey = new PublicKey(options.programId);
@@ -50,13 +53,13 @@ export async function fetchSignatures(
       count: signatures.length,
       before: options.before,
     },
-    'Fetched signatures'
+    "Fetched signatures",
   );
   return signatures;
 }
 
 export async function fetchTransaction(
-  signature: string
+  signature: string,
 ): Promise<ParsedTransactionWithMeta | null> {
   const conn = getConnection();
   const tx = await conn.getParsedTransaction(signature, {
@@ -66,7 +69,7 @@ export async function fetchTransaction(
 }
 
 export async function fetchTransactions(
-  signatures: string[]
+  signatures: string[],
 ): Promise<(ParsedTransactionWithMeta | null)[]> {
   if (signatures.length === 0) return [];
   const results: (ParsedTransactionWithMeta | null)[] = [];
@@ -80,14 +83,14 @@ export async function fetchTransactions(
       requested: signatures.length,
       received: results.filter(Boolean).length,
     },
-    'Fetched transactions'
+    "Fetched transactions",
   );
   return results;
 }
 
 async function fetchTransactionWithRetry(
   signature: string,
-  maxRetries = 5
+  maxRetries = 5,
 ): Promise<ParsedTransactionWithMeta | null> {
   const conn = getConnection();
   let lastError: Error | null = null;
@@ -99,22 +102,23 @@ async function fetchTransactionWithRetry(
       return tx;
     } catch (err) {
       lastError = err as Error;
-      const isRateLimit = (err as Error).message?.includes('429') ||
-        (err as Error).message?.includes('Too many requests');
+      const isRateLimit =
+        (err as Error).message?.includes("429") ||
+        (err as Error).message?.includes("Too many requests");
       if (isRateLimit) {
         const backoffMs = Math.min(1000 * Math.pow(2, attempt), 30000);
         logger.warn(
           { attempt, backoffMs, signature: signature.slice(0, 16) },
-          'Rate limited, backing off'
+          "Rate limited, backing off",
         );
         await sleep(backoffMs);
       } else {
-        logger.error({ err, signature }, 'Failed to fetch transaction');
+        logger.error({ err, signature }, "Failed to fetch transaction");
         break;
       }
     }
   }
-  logger.error({ lastError, signature }, 'Max retries exceeded');
+  logger.error({ lastError, signature }, "Max retries exceeded");
   return null;
 }
 

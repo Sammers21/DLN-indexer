@@ -80,7 +80,7 @@ function App() {
       setVolumes(volumesData);
       // Fetch summary
       const summaryRes = await fetch(
-        `${API_BASE}/volumes/summary${queryString}`
+        `${API_BASE}/volumes/summary${queryString}`,
       );
       if (!summaryRes.ok) throw new Error("Failed to fetch summary");
       const summaryData = await summaryRes.json();
@@ -92,7 +92,7 @@ function App() {
       if (startDate) ordersParams.set("start_date", startDate);
       if (endDate) ordersParams.set("end_date", endDate);
       const ordersRes = await fetch(
-        `${API_BASE}/orders?${ordersParams.toString()}`
+        `${API_BASE}/orders?${ordersParams.toString()}`,
       );
       if (!ordersRes.ok) throw new Error("Failed to fetch orders");
       const ordersData = await ordersRes.json();

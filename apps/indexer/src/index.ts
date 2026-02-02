@@ -8,11 +8,11 @@ import {
   closeClickHouseClient,
   enrichOrdersWithPrices,
   type Order,
-} from '@dln/shared';
-import { fetchSignatures, fetchTransactions, sleep } from './fetcher.js';
-import { parseTransaction } from './parser.js';
+} from "@dln/shared";
+import { fetchSignatures, fetchTransactions, sleep } from "./fetcher.js";
+import { parseTransaction } from "./parser.js";
 
-const logger = createLogger('indexer');
+const logger = createLogger("indexer");
 
 interface IndexerStats {
   totalSignatures: number;
@@ -24,10 +24,10 @@ interface IndexerStats {
 
 async function indexProgram(
   programId: string,
-  programType: 'src' | 'dst',
-  stats: IndexerStats
+  programType: "src" | "dst",
+  stats: IndexerStats,
 ): Promise<void> {
-  logger.info({ programId, programType }, 'Starting program indexing');
+  logger.info({ programId, programType }, "Starting program indexing");
   let checkpoint = await getCheckpoint(programType);
   let beforeSignature: string | undefined = checkpoint?.last_signature;
   let hasMore = true;
@@ -55,7 +55,10 @@ async function indexProgram(
           const parsedOrders = parseTransaction(tx);
           orders.push(...parsedOrders);
         } catch (err) {
-          logger.error({ err, signature: signatureStrings[i] }, 'Failed to parse transaction');
+          logger.error(
+            { err, signature: signatureStrings[i] },
+            "Failed to parse transaction",
+          );
           stats.errors++;
         }
       }
@@ -63,8 +66,12 @@ async function indexProgram(
         const enrichedOrders = await enrichOrdersWithPrices(orders);
         await insertOrders(enrichedOrders);
         stats.totalOrders += orders.length;
-        stats.createdOrders += orders.filter((o) => o.event_type === 'created').length;
-        stats.fulfilledOrders += orders.filter((o) => o.event_type === 'fulfilled').length;
+        stats.createdOrders += orders.filter(
+          (o) => o.event_type === "created",
+        ).length;
+        stats.fulfilledOrders += orders.filter(
+          (o) => o.event_type === "fulfilled",
+        ).length;
         logger.info(
           {
             batch: batchCount,
@@ -72,7 +79,7 @@ async function indexProgram(
             orders: orders.length,
             totalOrders: stats.totalOrders,
           },
-          'Processed batch'
+          "Processed batch",
         );
       }
       const lastSig = signatures[signatures.length - 1];
@@ -86,27 +93,31 @@ async function indexProgram(
       beforeSignature = lastSig.signature;
       await sleep(config.indexer.delayMs);
       if (stats.totalOrders >= 60000) {
-        logger.info('Reached target order count, stopping');
+        logger.info("Reached target order count, stopping");
         hasMore = false;
       }
     } catch (err) {
-      const isRateLimit = (err as Error).message?.includes('429') ||
-        (err as Error).message?.includes('Too many requests');
+      const isRateLimit =
+        (err as Error).message?.includes("429") ||
+        (err as Error).message?.includes("Too many requests");
       if (isRateLimit) {
-        logger.warn({ batch: batchCount }, 'Rate limited, waiting 30s before retry');
+        logger.warn(
+          { batch: batchCount },
+          "Rate limited, waiting 30s before retry",
+        );
         await sleep(30000);
       } else {
-        logger.error({ err, batch: batchCount }, 'Error processing batch');
+        logger.error({ err, batch: batchCount }, "Error processing batch");
         stats.errors++;
         await sleep(5000);
       }
     }
   }
-  logger.info({ programType, stats }, 'Program indexing complete');
+  logger.info({ programType, stats }, "Program indexing complete");
 }
 
 async function main(): Promise<void> {
-  logger.info('DLN Indexer starting');
+  logger.info("DLN Indexer starting");
   const stats: IndexerStats = {
     totalSignatures: 0,
     totalOrders: 0,
@@ -115,11 +126,11 @@ async function main(): Promise<void> {
     errors: 0,
   };
   try {
-    await indexProgram(config.dln.srcProgramId, 'src', stats);
-    await indexProgram(config.dln.dstProgramId, 'dst', stats);
-    logger.info({ stats }, 'Indexing complete');
+    await indexProgram(config.dln.srcProgramId, "src", stats);
+    await indexProgram(config.dln.dstProgramId, "dst", stats);
+    logger.info({ stats }, "Indexing complete");
   } catch (err) {
-    logger.error({ err }, 'Fatal error during indexing');
+    logger.error({ err }, "Fatal error during indexing");
     process.exit(1);
   } finally {
     await closeRedisClient();
@@ -127,21 +138,21 @@ async function main(): Promise<void> {
   }
 }
 
-process.on('SIGINT', async () => {
-  logger.info('Received SIGINT, shutting down');
+process.on("SIGINT", async () => {
+  logger.info("Received SIGINT, shutting down");
   await closeRedisClient();
   await closeClickHouseClient();
   process.exit(0);
 });
 
-process.on('SIGTERM', async () => {
-  logger.info('Received SIGTERM, shutting down');
+process.on("SIGTERM", async () => {
+  logger.info("Received SIGTERM, shutting down");
   await closeRedisClient();
   await closeClickHouseClient();
   process.exit(0);
 });
 
 main().catch((err) => {
-  logger.error({ err }, 'Unhandled error');
+  logger.error({ err }, "Unhandled error");
   process.exit(1);
 });

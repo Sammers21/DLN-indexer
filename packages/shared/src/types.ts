@@ -1,4 +1,4 @@
-export type EventType = 'created' | 'fulfilled';
+export type EventType = "created" | "fulfilled";
 
 export interface Order {
   order_id: string;
@@ -26,7 +26,7 @@ export interface DailyVolume {
 }
 
 export interface IndexerCheckpoint {
-  program: 'src' | 'dst';
+  program: "src" | "dst";
   last_signature: string;
   last_slot: number;
   updated_at: string;

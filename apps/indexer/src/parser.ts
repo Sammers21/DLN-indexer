@@ -1,5 +1,5 @@
-import { BorshCoder, EventParser } from '@coral-xyz/anchor';
-import { ParsedTransactionWithMeta, PublicKey } from '@solana/web3.js';
+import { BorshCoder, EventParser } from "@coral-xyz/anchor";
+import { ParsedTransactionWithMeta, PublicKey } from "@solana/web3.js";
 import {
   config,
   createLogger,
@@ -9,23 +9,29 @@ import {
   type FulfilledEvent,
   type Order,
   type EventType,
-} from '@dln/shared';
+} from "@dln/shared";
 
-const logger = createLogger('parser');
+const logger = createLogger("parser");
 
 const srcCoder = new BorshCoder(DLN_SRC_IDL);
 const dstCoder = new BorshCoder(DLN_DST_IDL);
 
-const srcEventParser = new EventParser(new PublicKey(config.dln.srcProgramId), srcCoder);
-const dstEventParser = new EventParser(new PublicKey(config.dln.dstProgramId), dstCoder);
+const srcEventParser = new EventParser(
+  new PublicKey(config.dln.srcProgramId),
+  srcCoder,
+);
+const dstEventParser = new EventParser(
+  new PublicKey(config.dln.dstProgramId),
+  dstCoder,
+);
 
 export function toHex(arr: Uint8Array | number[]): string {
-  return Buffer.from(arr).toString('hex');
+  return Buffer.from(arr).toString("hex");
 }
 
 export function bytesToBigInt(bytes: Uint8Array | number[]): bigint {
-  const hex = Buffer.from(bytes).reverse().toString('hex');
-  return hex ? BigInt('0x' + hex) : 0n;
+  const hex = Buffer.from(bytes).reverse().toString("hex");
+  return hex ? BigInt("0x" + hex) : 0n;
 }
 
 export function bytesToChainId(bytes: Uint8Array | number[]): string {
@@ -34,7 +40,7 @@ export function bytesToChainId(bytes: Uint8Array | number[]): string {
 }
 
 export function parseCreatedOrderEvents(
-  tx: ParsedTransactionWithMeta
+  tx: ParsedTransactionWithMeta,
 ): { orderId: string; event: CreatedOrderEvent }[] {
   const results: { orderId: string; event: CreatedOrderEvent }[] = [];
   if (!tx.meta?.logMessages) return results;
@@ -43,9 +49,9 @@ export function parseCreatedOrderEvents(
     let createdOrderEvent: CreatedOrderEvent | null = null;
     let orderId: string | null = null;
     for (const event of events) {
-      if (event.name === 'CreatedOrder') {
+      if (event.name === "CreatedOrder") {
         createdOrderEvent = event.data as unknown as CreatedOrderEvent;
-      } else if (event.name === 'CreatedOrderId') {
+      } else if (event.name === "CreatedOrderId") {
         const data = event.data as { orderId: number[] };
         orderId = toHex(data.orderId);
       }
@@ -57,20 +63,23 @@ export function parseCreatedOrderEvents(
       });
     }
   } catch (err) {
-    logger.debug({ err, signature: tx.transaction.signatures[0] }, 'Failed to parse src events');
+    logger.debug(
+      { err, signature: tx.transaction.signatures[0] },
+      "Failed to parse src events",
+    );
   }
   return results;
 }
 
 export function parseFulfilledEvents(
-  tx: ParsedTransactionWithMeta
+  tx: ParsedTransactionWithMeta,
 ): { orderId: string; event: FulfilledEvent }[] {
   const results: { orderId: string; event: FulfilledEvent }[] = [];
   if (!tx.meta?.logMessages) return results;
   try {
     const events = dstEventParser.parseLogs(tx.meta.logMessages);
     for (const event of events) {
-      if (event.name === 'Fulfilled') {
+      if (event.name === "Fulfilled") {
         const data = event.data as { orderId: number[]; taker: PublicKey };
         const orderId = toHex(data.orderId);
         results.push({
@@ -83,7 +92,10 @@ export function parseFulfilledEvents(
       }
     }
   } catch (err) {
-    logger.debug({ err, signature: tx.transaction.signatures[0] }, 'Failed to parse dst events');
+    logger.debug(
+      { err, signature: tx.transaction.signatures[0] },
+      "Failed to parse dst events",
+    );
   }
   return results;
 }
@@ -91,12 +103,12 @@ export function parseFulfilledEvents(
 export function createdEventToOrder(
   orderId: string,
   event: CreatedOrderEvent,
-  tx: ParsedTransactionWithMeta
+  tx: ParsedTransactionWithMeta,
 ): Order {
   const order = event.order;
   return {
     order_id: orderId,
-    event_type: 'created' as EventType,
+    event_type: "created" as EventType,
     tx_signature: tx.transaction.signatures[0],
     slot: BigInt(tx.slot),
     block_time: new Date((tx.blockTime || 0) * 1000),
@@ -113,11 +125,11 @@ export function createdEventToOrder(
 export function fulfilledEventToOrder(
   orderId: string,
   event: FulfilledEvent,
-  tx: ParsedTransactionWithMeta
+  tx: ParsedTransactionWithMeta,
 ): Order {
   return {
     order_id: orderId,
-    event_type: 'fulfilled' as EventType,
+    event_type: "fulfilled" as EventType,
     tx_signature: tx.transaction.signatures[0],
     slot: BigInt(tx.slot),
     block_time: new Date((tx.blockTime || 0) * 1000),

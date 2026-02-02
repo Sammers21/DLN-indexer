@@ -1,35 +1,43 @@
-import { getCachedPrice, setCachedPrice, getCachedPrices, setCachedPrices } from './redis.js';
-import { createLogger } from '../utils/logger.js';
-import type { Order } from '../types.js';
+import {
+  getCachedPrice,
+  setCachedPrice,
+  getCachedPrices,
+  setCachedPrices,
+} from "./redis.js";
+import { createLogger } from "../utils/logger.js";
+import type { Order } from "../types.js";
 
-const logger = createLogger('price-service');
+const logger = createLogger("price-service");
 
-const JUPITER_PRICE_API = 'https://price.jup.ag/v6/price';
+const JUPITER_PRICE_API = "https://price.jup.ag/v6/price";
 
-const KNOWN_TOKENS: Record<string, { symbol: string; decimals: number; isStablecoin?: boolean }> = {
-  'c6fa7af3bedbad3a3d65f36aabc97431b1bbe4c2d2f6e0e47ca60203452f5d61': {
-    symbol: 'USDC',
+const KNOWN_TOKENS: Record<
+  string,
+  { symbol: string; decimals: number; isStablecoin?: boolean }
+> = {
+  c6fa7af3bedbad3a3d65f36aabc97431b1bbe4c2d2f6e0e47ca60203452f5d61: {
+    symbol: "USDC",
     decimals: 6,
     isStablecoin: true,
   },
-  'dac17f958d2ee523a2206206994597c13d831ec7': {
-    symbol: 'USDT',
+  dac17f958d2ee523a2206206994597c13d831ec7: {
+    symbol: "USDT",
     decimals: 6,
     isStablecoin: true,
   },
-  'so11111111111111111111111111111111111111112': {
-    symbol: 'SOL',
+  so11111111111111111111111111111111111111112: {
+    symbol: "SOL",
     decimals: 9,
   },
 };
 
-const SOLANA_CHAIN_ID = '7565164';
+const SOLANA_CHAIN_ID = "7565164";
 
 async function fetchJupiterPrice(tokenMint: string): Promise<number | null> {
   try {
     const response = await fetch(`${JUPITER_PRICE_API}?ids=${tokenMint}`);
     if (!response.ok) {
-      logger.warn({ status: response.status, tokenMint }, 'Jupiter API error');
+      logger.warn({ status: response.status, tokenMint }, "Jupiter API error");
       return null;
     }
     const data = (await response.json()) as {
@@ -37,19 +45,21 @@ async function fetchJupiterPrice(tokenMint: string): Promise<number | null> {
     };
     return data.data?.[tokenMint]?.price || null;
   } catch (err) {
-    logger.error({ err, tokenMint }, 'Failed to fetch Jupiter price');
+    logger.error({ err, tokenMint }, "Failed to fetch Jupiter price");
     return null;
   }
 }
 
-async function fetchJupiterPrices(tokenMints: string[]): Promise<Map<string, number>> {
+async function fetchJupiterPrices(
+  tokenMints: string[],
+): Promise<Map<string, number>> {
   const prices = new Map<string, number>();
   if (tokenMints.length === 0) return prices;
   try {
-    const ids = tokenMints.join(',');
+    const ids = tokenMints.join(",");
     const response = await fetch(`${JUPITER_PRICE_API}?ids=${ids}`);
     if (!response.ok) {
-      logger.warn({ status: response.status }, 'Jupiter API batch error');
+      logger.warn({ status: response.status }, "Jupiter API batch error");
       return prices;
     }
     const data = (await response.json()) as {
@@ -61,12 +71,14 @@ async function fetchJupiterPrices(tokenMints: string[]): Promise<Map<string, num
       }
     }
   } catch (err) {
-    logger.error({ err }, 'Failed to fetch Jupiter prices batch');
+    logger.error({ err }, "Failed to fetch Jupiter prices batch");
   }
   return prices;
 }
 
-export async function getTokenPrice(tokenAddress: string): Promise<number | null> {
+export async function getTokenPrice(
+  tokenAddress: string,
+): Promise<number | null> {
   const cached = await getCachedPrice(tokenAddress);
   if (cached !== null) {
     return cached;
@@ -83,7 +95,9 @@ export async function getTokenPrice(tokenAddress: string): Promise<number | null
   return price;
 }
 
-export async function getTokenPrices(tokenAddresses: string[]): Promise<Map<string, number>> {
+export async function getTokenPrices(
+  tokenAddresses: string[],
+): Promise<Map<string, number>> {
   const result = new Map<string, number>();
   const uncached: string[] = [];
   const cached = await getCachedPrices(tokenAddresses);
@@ -112,7 +126,7 @@ export async function getTokenPrices(tokenAddresses: string[]): Promise<Map<stri
 export function calculateUsdValue(
   amount: bigint,
   decimals: number,
-  priceUsd: number
+  priceUsd: number,
 ): number {
   const divisor = BigInt(10 ** decimals);
   const wholeUnits = Number(amount / divisor);
@@ -125,10 +139,12 @@ function getTokenDecimals(tokenAddress: string): number {
   return knownToken?.decimals || 6;
 }
 
-export async function enrichOrdersWithPrices(orders: Order[]): Promise<Order[]> {
+export async function enrichOrdersWithPrices(
+  orders: Order[],
+): Promise<Order[]> {
   const tokenAddresses = new Set<string>();
   for (const order of orders) {
-    if (order.event_type === 'created' && order.give_token_address) {
+    if (order.event_type === "created" && order.give_token_address) {
       if (order.give_chain_id === SOLANA_CHAIN_ID) {
         tokenAddresses.add(order.give_token_address);
       }
@@ -136,7 +152,11 @@ export async function enrichOrdersWithPrices(orders: Order[]): Promise<Order[]> 
   }
   const prices = await getTokenPrices(Array.from(tokenAddresses));
   return orders.map((order) => {
-    if (order.event_type === 'created' && order.give_token_address && order.give_amount) {
+    if (
+      order.event_type === "created" &&
+      order.give_token_address &&
+      order.give_amount
+    ) {
       const price = prices.get(order.give_token_address);
       if (price) {
         const decimals = getTokenDecimals(order.give_token_address);
