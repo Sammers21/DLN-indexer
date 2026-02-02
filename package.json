@@ -1,0 +1,25 @@
+{
+  "name": "dln-indexer-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "packageManager": "bun@1.1.18",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "test": "turbo test",
+    "test:run": "turbo test:run",
+    "lint": "turbo lint",
+    "format": "prettier --write \"**/*.{ts,tsx,json,md}\"",
+    "indexer": "bun run --filter=@dln/indexer start",
+    "api": "bun run --filter=@dln/api start",
+    "dashboard": "bun run --filter=@dln/dashboard dev"
+  },
+  "devDependencies": {
+    "prettier": "^3.4.2",
+    "turbo": "^2.4.2"
+  }
+}
