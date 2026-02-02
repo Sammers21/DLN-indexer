@@ -1,8 +1,9 @@
-import { Connection, PublicKey, ConfirmedSignatureInfo } from "@solana/web3.js";
+import { PublicKey, ConfirmedSignatureInfo, VersionedTransactionResponse } from "@solana/web3.js";
 import { BorshCoder, EventParser } from "@coral-xyz/anchor";
 import { config, createLogger, DLN_SRC_IDL, DLN_DST_IDL } from "@dln/shared";
 import { Checkpoint, CheckpointStore, ProgramType } from "./checkpoint";
 import { Analytics, Order, OrderKind } from "./analytics";
+import { SolanaClient } from "./solana";
 
 const logger = createLogger("indexer");
 
@@ -19,16 +20,16 @@ const srcEventParser = new EventParser(DLN_SRC, srcCoder);
 const dstEventParser = new EventParser(DLN_DST, dstCoder);
 
 export class Indexer {
-    private readonly connection: Connection;
+    private readonly solana: SolanaClient;
     private readonly checkpointStore: CheckpointStore;
     private readonly analytics: Analytics;
     private running = false;
     constructor(
-        connection: Connection,
+        solana: SolanaClient,
         checkpointStore: CheckpointStore,
         analytics: Analytics
     ) {
-        this.connection = connection;
+        this.solana = solana;
         this.checkpointStore = checkpointStore;
         this.analytics = analytics;
     }
@@ -51,11 +52,18 @@ export class Indexer {
                 }
                 // Process in chronological order (oldest first)
                 const chronological = signatures.reverse();
+                const validSigs = chronological.filter((s) => !s.err);
+                if (validSigs.length === 0) {
+                    await this.sleep(config.indexer.delayMs);
+                    continue;
+                }
+                // Fetch and parse transactions (rate-limited by SolanaClient)
                 const allOrders: Order[] = [];
                 let latestSigInfo: ConfirmedSignatureInfo | null = null;
-                for (const sigInfo of chronological) {
-                    if (sigInfo.err) continue;
-                    const orders = await this.parseTransaction(sigInfo, eventParser, eventName, kind);
+                for (const sigInfo of validSigs) {
+                    const tx = await this.solana.getTransaction(sigInfo.signature);
+                    if (!tx) continue;
+                    const orders = this.parseTransactionLogs(tx, sigInfo, eventParser, eventName, kind);
                     allOrders.push(...orders);
                     latestSigInfo = sigInfo;
                 }
@@ -105,25 +113,22 @@ export class Indexer {
         untilSignature: string | null,
         limit: number
     ): Promise<ConfirmedSignatureInfo[]> {
-        const options: { limit: number; until?: string } = { limit };
+        const options: { limit?: number; until?: string } = { limit };
         if (untilSignature) {
             options.until = untilSignature;
         }
-        return this.connection.getSignaturesForAddress(programId, options);
+        return this.solana.getSignaturesForAddress(programId, options);
     }
-    private async parseTransaction(
+    private parseTransactionLogs(
+        tx: VersionedTransactionResponse,
         sigInfo: ConfirmedSignatureInfo,
         eventParser: EventParser,
         eventName: string,
         kind: OrderKind
-    ): Promise<Order[]> {
+    ): Order[] {
         const orders: Order[] = [];
+        if (!tx.meta?.logMessages) return orders;
         try {
-            const tx = await this.connection.getTransaction(sigInfo.signature, {
-                commitment: "confirmed",
-                maxSupportedTransactionVersion: 0,
-            });
-            if (!tx?.meta?.logMessages) return orders;
             const events = eventParser.parseLogs(tx.meta.logMessages);
             for (const event of events) {
                 if (event.name === eventName) {
@@ -139,7 +144,7 @@ export class Indexer {
                 }
             }
         } catch (err) {
-            logger.debug({ err, signature: sigInfo.signature }, "Failed to parse transaction");
+            logger.debug({ err, signature: sigInfo.signature }, "Failed to parse transaction logs");
         }
         return orders;
     }

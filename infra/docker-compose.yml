@@ -5,15 +5,15 @@ services:
     image: clickhouse/clickhouse-server:26.1
     container_name: dln-clickhouse
     ports:
-      - "8123:8123"  # HTTP interface
-      - "9000:9000"  # Native protocol
+      - "8123:8123" # HTTP interface
+      - "9000:9000" # Native protocol
     volumes:
       - clickhouse_data:/var/lib/clickhouse
       - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
     environment:
       - CLICKHOUSE_DB=dln
-      - CLICKHOUSE_USER=default
-      - CLICKHOUSE_PASSWORD=
+      - CLICKHOUSE_USER=dln_admin
+      - CLICKHOUSE_PASSWORD=G6lxIxGvddWE5eTJ
       - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
     ulimits:
       nofile:
@@ -32,9 +32,9 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes --requirepass hTcBzuRpphtxJczJ
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "hTcBzuRpphtxJczJ", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5

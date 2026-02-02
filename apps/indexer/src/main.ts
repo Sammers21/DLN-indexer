@@ -1,21 +1,17 @@
-import { Connection } from "@solana/web3.js";
 import { config, createLogger } from "@dln/shared";
 import { CheckpointStore, RedisCheckpointStore } from "./checkpoint";
 import { Analytics, ClickHouseAnalytics } from "./analytics";
 import { Indexer } from "./indexer";
+import { SolanaClient } from "./solana";
 
 const logger = createLogger("indexer");
 
-
-
 async function main(): Promise<void> {
-  logger.info({ rpcUrl: config.solana.rpcUrl }, "DLN Indexer starting");
-  const connection = new Connection(config.solana.rpcUrl, {
-    commitment: "confirmed",
-  });
+  logger.info({ rpcUrl: config.solana.rpcUrl, rps: config.solana.rps }, "DLN Indexer starting");
+  const solana = new SolanaClient();
   const checkpointStore: CheckpointStore = new RedisCheckpointStore(config.redis.url);
   const analytics: Analytics = new ClickHouseAnalytics(config.clickhouse.host);
-  const indexer = new Indexer(connection, checkpointStore, analytics);
+  const indexer = new Indexer(solana, checkpointStore, analytics);
   async function shutdown(code: number): Promise<void> {
     indexer.stop();
     await Promise.all([analytics.close(), checkpointStore.close()]);
