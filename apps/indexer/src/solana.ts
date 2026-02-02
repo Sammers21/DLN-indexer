@@ -8,6 +8,9 @@ import { config, createLogger } from "@dln/shared";
 
 const logger = createLogger("solana");
 
+const MAX_RETRIES = 5;
+const BASE_RETRY_DELAY = 1000;
+
 export class SolanaClient {
     private readonly connection: Connection;
     private readonly rps: number;
@@ -50,20 +53,40 @@ export class SolanaClient {
     private sleep(ms: number): Promise<void> {
         return new Promise((resolve) => setTimeout(resolve, ms));
     }
+    private async withRetry<T>(fn: () => Promise<T>): Promise<T> {
+        let lastError: Error | null = null;
+        for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+            try {
+                await this.waitForRateLimit();
+                return await fn();
+            } catch (err) {
+                lastError = err as Error;
+                const is429 = lastError.message?.includes("429") || lastError.message?.includes("Too Many Requests");
+                if (is429 && attempt < MAX_RETRIES - 1) {
+                    const delay = BASE_RETRY_DELAY * Math.pow(2, attempt);
+                    logger.warn({ attempt: attempt + 1, delay }, "Rate limited (429), backing off...");
+                    await this.sleep(delay);
+                } else {
+                    throw lastError;
+                }
+            }
+        }
+        throw lastError;
+    }
     async getSignaturesForAddress(
         address: PublicKey,
         options?: { limit?: number; until?: string }
     ): Promise<ConfirmedSignatureInfo[]> {
-        await this.waitForRateLimit();
-        return this.connection.getSignaturesForAddress(address, options);
+        return this.withRetry(() => this.connection.getSignaturesForAddress(address, options));
     }
     async getTransaction(
         signature: string
     ): Promise<VersionedTransactionResponse | null> {
-        await this.waitForRateLimit();
-        return this.connection.getTransaction(signature, {
-            commitment: "confirmed",
-            maxSupportedTransactionVersion: 0,
-        });
+        return this.withRetry(() =>
+            this.connection.getTransaction(signature, {
+                commitment: "confirmed",
+                maxSupportedTransactionVersion: 0,
+            })
+        );
     }
 }

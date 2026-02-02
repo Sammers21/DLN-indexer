@@ -7,7 +7,7 @@ import { SolanaClient } from "./solana";
 const logger = createLogger("indexer");
 
 async function main(): Promise<void> {
-  logger.info({ rpcUrl: config.solana.rpcUrl, rps: config.solana.rps }, "DLN Indexer starting");
+  logger.info("DLN Indexer starting");
   const solana = new SolanaClient();
   const checkpointStore: CheckpointStore = new RedisCheckpointStore(config.redis.url);
   const analytics: Analytics = new ClickHouseAnalytics(config.clickhouse.host);

@@ -8,7 +8,16 @@ import { SolanaClient } from "./solana";
 const logger = createLogger("indexer");
 
 function formatTime(timestamp: number): string {
-    return new Date(timestamp * 1000).toISOString();
+    const date = new Date(timestamp * 1000);
+    return date.toLocaleString("en-US", {
+        year: "numeric",
+        month: "short",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+    });
 }
 
 const DLN_SRC = new PublicKey(config.dln.srcProgramId);
@@ -40,7 +49,11 @@ export class Indexer {
         const eventName = kind === "OrderCreated" ? "CreatedOrder" : "Fulfilled";
         let lastSignature = checkpoint?.lastSignature ?? null;
         this.running = true;
-        logger.info({ kind, checkpoint }, "Starting indexing");
+        logger.info({
+            kind,
+            lastSignature: checkpoint?.lastSignature ?? "none",
+            blockTime: checkpoint ? formatTime(checkpoint.blockTime) : "none",
+        }, "Starting indexing");
         while (this.running) {
             try {
                 // Fetch signatures after the checkpoint (newest first)
