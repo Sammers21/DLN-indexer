@@ -45,4 +45,7 @@ export const config = {
     srcProgramId: "src5qyZHqTqecJV4aY6Cb6zDZLMDzrDKKezs22MPHr4",
     dstProgramId: "dst5MGcFPoBeREFAA5E3tU5ij8m5uVYwkzkSAbsLbNo",
   },
+  jupiter: {
+    apiKey: process.env.JUPITER_API_KEY || "",
+  },
 } as const;

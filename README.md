@@ -5,8 +5,9 @@ A production-ready application that indexes DLN (deBridge Liquidity Network) ord
 ## Features
 
 - **Event Indexing**: Indexes `OrderCreated` and `OrderFulfilled` events from DLN contracts on Solana
-- **USD Volume Calculation**: Converts token amounts to USD using Jupiter Price API with Redis caching
-- **Restart Safety**: Checkpoint-based indexing that resumes from the last processed signature
+- **Bidirectional Indexing**: Prioritizes new transactions while also backfilling historical data
+- **USD Volume Calculation**: Converts token amounts to USD using Jupiter Price API
+- **Restart Safety**: Interval-based checkpoint that tracks indexed range (from/to signatures)
 - **Analytics Dashboard**: React-based dashboard with daily volume charts and date filtering
 - **High-Performance Storage**: Uses ClickHouse for fast analytical queries
 
@@ -24,8 +25,8 @@ A production-ready application that indexes DLN (deBridge Liquidity Network) ord
 ┌─────────────────────────────────────────────────────────────────┐
 │                       Storage Layer                              │
 │  ┌──────────────┐                    ┌──────────────┐           │
-│  │  ClickHouse  │ ←─ Orders Data ─→  │    Redis     │           │
-│  │  (Analytics) │                    │  (Caching)   │           │
+│  │  ClickHouse  │ ←─ Orders Data     │    Redis     │           │
+│  │  (Analytics) │                    │ (Checkpoint) │           │
 │  └──────────────┘                    └──────────────┘           │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
@@ -49,13 +50,34 @@ A production-ready application that indexes DLN (deBridge Liquidity Network) ord
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+## Indexing Strategy
+
+The indexer uses a **bidirectional approach** with interval-based checkpoints:
+
+1. **Forward (Upwards)**: Fetches new transactions after the checkpoint's `to` boundary
+2. **Backward**: When forward batch is small, also fetches older transactions before the `from` boundary
+3. **Checkpoint Interval**: Stores both `from` (oldest indexed) and `to` (newest indexed) signatures
+
+```
+Time →
+[────────────indexed range────────────]
+from                                  to
+↑ backward                   forward ↑
+```
+
+This ensures:
+
+- New transactions are prioritized
+- Historical data is backfilled during idle periods
+- Full coverage of the transaction history over time
+
 ## Technology Stack
 
 | Component | Technology              | Rationale                               |
 | --------- | ----------------------- | --------------------------------------- |
 | Runtime   | Bun + TypeScript        | Fast startup, native TS support         |
 | Database  | ClickHouse              | Column-oriented OLAP, fast aggregations |
-| Cache     | Redis                   | Checkpoint state, price caching         |
+| Cache     | Redis                   | Checkpoint state storage                |
 | API       | Fastify                 | High performance, TypeScript support    |
 | Dashboard | React + Vite + Recharts | Modern, fast, good charting             |
 | Monorepo  | Turborepo               | Fast builds, smart caching              |
@@ -105,9 +127,9 @@ bun run indexer
 The indexer will:
 
 1. Connect to Solana RPC
-2. Fetch historical transactions from DLN programs
+2. Fetch transactions from DLN programs (forward and backward)
 3. Parse `CreatedOrder` and `Fulfilled` events
-4. Enrich with USD prices from Jupiter
+4. Enrich `OrderCreated` with USD prices from Jupiter
 5. Store in ClickHouse
 
 ### 5. Start the API Server
@@ -134,8 +156,12 @@ dln-indexer/
 │   ├── indexer/             # Solana transaction indexer
 │   │   └── src/
 │   │       ├── main.ts      # Main entry point
-│   │       ├── fetcher.ts   # RPC transaction fetching
-│   │       └── parser.ts    # DLN event parsing
+│   │       ├── indexer.ts   # Core indexing logic
+│   │       ├── solana.ts    # Rate-limited Solana client
+│   │       ├── price.ts     # Jupiter price fetching
+│   │       ├── analytics/   # ClickHouse analytics
+│   │       ├── checkpoint/  # Checkpoint interfaces
+│   │       └── storage/     # Redis & ClickHouse implementations
 │   ├── api/                 # Fastify REST API
 │   │   └── src/
 │   │       ├── main.ts      # API server
@@ -207,13 +233,16 @@ Using Anchor's `BorshCoder` and `EventParser` to deserialize events from transac
 ### 3. Price Conversion Strategy
 
 - **Jupiter Price API**: Real-time prices for Solana tokens
-- **Redis caching**: 5-minute TTL to avoid API rate limits
+- **OrderCreated**: USD value calculated from `give` token amount
+- **OrderFulfilled**: USD value set to -1 (not calculated)
 - **Stablecoin handling**: USDC/USDT treated as $1.00
 
-### 4. Restart Safety
+### 4. Restart Safety with Interval Checkpoints
 
-- Checkpoint stored in Redis with last processed signature
-- Indexer resumes from checkpoint on restart
+- Checkpoint stored in Redis with `from` and `to` boundaries
+- `from`: Oldest indexed signature (expands backward)
+- `to`: Newest indexed signature (expands forward)
+- Indexer resumes from both boundaries on restart
 - ReplacingMergeTree handles duplicate inserts if overlap occurs
 
 ### 5. Monorepo with Turborepo
@@ -227,7 +256,7 @@ Using Anchor's `BorshCoder` and `EventParser` to deserialize events from transac
 1. **Price Accuracy**: Uses spot price at indexing time, not historical prices at transaction time
 2. **Token Decimals**: Default to 6 decimals for unknown tokens (common for stablecoins)
 3. **Solana Chain ID**: `7565164` (0x736F6C = "sol")
-4. **RPC Rate Limits**: Built-in delays between batches to respect public RPC limits
+4. **RPC Rate Limits**: Built-in rate limiter (bottleneck) to respect RPC limits
 
 ## Running Tests
 
@@ -259,13 +288,13 @@ bun run test
 
 ## Future Improvements
 
-- [ ] WebSocket subscription for real-time indexing
 - [ ] Historical price backfill using CoinGecko API
 - [ ] GraphQL API for flexible queries
 - [ ] Kubernetes deployment manifests
 - [ ] Prometheus metrics and Grafana dashboards
 - [ ] Multi-chain support (EVM orders)
 - [ ] Order lifecycle tracking (created → fulfilled → unlocked)
+- [ ] Calculate USD value for OrderFulfilled from stored OrderCreated data
 
 ## License
 

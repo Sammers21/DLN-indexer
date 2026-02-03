@@ -1,12 +1,15 @@
 import { PublicKey, ConfirmedSignatureInfo, VersionedTransactionResponse } from "@solana/web3.js";
 import { BorshCoder, EventParser } from "@coral-xyz/anchor";
 import { config, createLogger, DLN_SRC_IDL, DLN_DST_IDL } from "@dln/shared";
-import { Checkpoint, CheckpointStore, ProgramType } from "./checkpoint";
+import { Checkpoint, CheckpointBoundary, CheckpointStore, ProgramType } from "./checkpoint";
 import { Analytics, Order, OrderKind } from "./analytics";
 import { SolanaClient } from "./solana";
 import { getUsdValue } from "./price";
+import { getUsdValueFromDlnApi } from "./dln-api";
 
 const logger = createLogger("indexer");
+
+type Direction = "forward" | "backward";
 
 function formatTime(timestamp: number): string {
     const date = new Date(timestamp * 1000);
@@ -95,34 +98,46 @@ export class Indexer {
         this.checkpoint = await this.checkpointStore.getCheckpoint(this.programType);
         this.running = true;
         this.lastCheckpointSaveTime = Date.now();
-        logger.info({
-            kind: this.kind,
-            lastSignature: this.checkpoint?.lastSignature ?? "none",
-            blockTime: this.checkpoint ? formatTime(this.checkpoint.blockTime) : "none",
-        }, "Starting indexing");
+        if (this.checkpoint) {
+            logger.info({
+                kind: this.kind,
+                from: { signature: this.checkpoint.from.signature.slice(0, 16) + "...", blockTime: formatTime(this.checkpoint.from.blockTime) },
+                to: { signature: this.checkpoint.to.signature.slice(0, 16) + "...", blockTime: formatTime(this.checkpoint.to.blockTime) },
+            }, "Starting indexing with existing checkpoint");
+        } else {
+            logger.info({ kind: this.kind }, "Starting indexing (no checkpoint)");
+        }
         while (this.running) {
             try {
-                // Step 1: Fetch new signatures (after checkpoint)
-                // `until` stops when reaching the checkpoint signature
-                const signatures = await this.solana.getSignaturesForAddress(this.programId, {
+                // 1. Fetch new transactions (upwards/forward)
+                const signaturesUpwards = await this.solana.getSignaturesForAddress(this.programId, {
                     limit: config.indexer.batchSize,
-                    until: this.checkpoint?.lastSignature,
+                    until: this.checkpoint?.to.signature,
                 });
-                if (signatures.length === 0) {
-                    logger.info(`${this.kind} indexer: No new signatures, waiting ${config.indexer.delayMs}ms`);
-                    await this.sleep(config.indexer.delayMs);
-                    continue;
+                // Process upwards signatures (oldest-first for chronological order)
+                if (signaturesUpwards.length > 0) {
+                    const chronological = signaturesUpwards.reverse();
+                    for (const sigInfo of chronological) {
+                        if (!this.running) break;
+                        await this.handleSignature(sigInfo, "forward");
+                    }
                 }
-                // Signatures come newest-first, reverse to process oldest-first (chronological)
-                const chronological = signatures.reverse();
-                // Step 2: Process each transaction one by one
-                for (const sigInfo of chronological) {
-                    if (!this.running) break;
-                    await this.handleSignature(sigInfo);
-                }
-                // if fetched batch is small then we sleep before checking signatures again
-                if (signatures.length < config.indexer.batchSize) {
-                    await this.sleep(config.indexer.delayMs);
+                // 2. If upwards batch is small, also fetch backwards
+                if (signaturesUpwards.length < config.indexer.batchSize && this.checkpoint) {
+                    const signaturesBackwards = await this.solana.getSignaturesForAddress(this.programId, {
+                        limit: config.indexer.batchSize,
+                        before: this.checkpoint.from.signature,
+                    });
+                    // Process backwards signatures (newest-first, going back in time)
+                    for (const sigInfo of signaturesBackwards) {
+                        if (!this.running) break;
+                        await this.handleSignature(sigInfo, "backward");
+                    }
+                    // If both directions have no signatures, sleep
+                    if (signaturesUpwards.length === 0 && signaturesBackwards.length === 0) {
+                        logger.info(`${this.kind} indexer: No new signatures, waiting ${config.indexer.delayMs}ms`);
+                        await this.sleep(config.indexer.delayMs);
+                    }
                 }
             } catch (err) {
                 logger.error({ err, kind: this.kind }, "Error during indexing, retrying...");
@@ -134,17 +149,17 @@ export class Indexer {
         this.running = false;
         logger.info({ kind: this.kind }, "Indexer stopping");
     }
-    private async handleSignature(sigInfo: ConfirmedSignatureInfo): Promise<void> {
+    private async handleSignature(sigInfo: ConfirmedSignatureInfo, direction: Direction): Promise<void> {
         if (sigInfo.err) {
             // Skip failed transactions but still update checkpoint
-            await this.updateCheckpoint(sigInfo);
+            await this.updateCheckpoint(sigInfo, direction);
             return;
         }
         // Fetch transaction
         const tx = await this.solana.getTransaction(sigInfo.signature);
         if (!tx) {
             logger.warn({ signature: sigInfo.signature }, "Transaction not found");
-            await this.updateCheckpoint(sigInfo);
+            await this.updateCheckpoint(sigInfo, direction);
             return;
         }
         // Parse and process
@@ -156,10 +171,11 @@ export class Indexer {
                 orderId: order.orderId,
                 kind: this.kind,
                 time: formatTime(order.time),
+                direction,
             }, "Order indexed");
         }
         // Update checkpoint
-        await this.updateCheckpoint(sigInfo);
+        await this.updateCheckpoint(sigInfo, direction);
     }
     private async processTransaction(
         tx: VersionedTransactionResponse,
@@ -219,11 +235,13 @@ export class Indexer {
             if (event.name !== "Fulfilled") continue;
             const data = event.data as unknown as FulfilledData;
             const orderId = Buffer.from(data.orderId).toString("hex");
+            // Fetch USD value from DLN API
+            const usdValue = await getUsdValueFromDlnApi(orderId);
             const order: Order = {
                 orderId,
                 signature: sigInfo.signature,
                 time: txBlockTime,
-                usdValue: -1,
+                usdValue,
                 kind: this.kind,
             };
             await this.analytics.insertOrders([order]);
@@ -231,18 +249,32 @@ export class Indexer {
         }
         return null;
     }
-    private async updateCheckpoint(sigInfo: ConfirmedSignatureInfo): Promise<void> {
+    private async updateCheckpoint(sigInfo: ConfirmedSignatureInfo, direction: Direction): Promise<void> {
         const now = Date.now();
         const blockTime = sigInfo.blockTime ?? Math.floor(now / 1000);
-        this.checkpoint = {
-            lastSignature: sigInfo.signature,
+        const boundary: CheckpointBoundary = {
+            signature: sigInfo.signature,
             blockTime,
         };
+        if (!this.checkpoint) {
+            // Initialize checkpoint with both from and to pointing to this signature
+            this.checkpoint = { from: boundary, to: boundary };
+        } else if (direction === "forward") {
+            // Update the "to" boundary (newest)
+            this.checkpoint = { ...this.checkpoint, to: boundary };
+        } else {
+            // Update the "from" boundary (oldest)
+            this.checkpoint = { ...this.checkpoint, from: boundary };
+        }
         // Only save to Redis if more than 1 second since last save
         if (now - this.lastCheckpointSaveTime >= 1000) {
             await this.checkpointStore.setCheckpoint(this.programType, this.checkpoint);
             this.lastCheckpointSaveTime = now;
-            logger.info(`${this.kind} checkpoint saved: signature=${sigInfo.signature.slice(0, 16)}..., blockTime=${formatTime(blockTime)}`);
+            logger.info(
+                `${this.kind} checkpoint saved [${direction}]: ` +
+                `from=${this.checkpoint.from.signature.slice(0, 16)}... (${formatTime(this.checkpoint.from.blockTime)}), ` +
+                `to=${this.checkpoint.to.signature.slice(0, 16)}... (${formatTime(this.checkpoint.to.blockTime)})`
+            );
         }
     }
     private sleep(ms: number): Promise<void> {

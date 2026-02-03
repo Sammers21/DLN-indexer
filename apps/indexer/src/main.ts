@@ -2,6 +2,7 @@ import { config, createLogger } from "@dln/shared";
 import { Indexer } from "./indexer";
 import { SolanaClient } from "./solana";
 import { Redis, Clickhouse } from "./storage";
+import { setPriceCache } from "./price";
 
 const logger = createLogger("indexer");
 
@@ -10,6 +11,8 @@ async function main(): Promise<void> {
   const solana = new SolanaClient();
   const redis = new Redis(config.redis.url);
   const clickhouse = new Clickhouse(config.clickhouse.host);
+  // Enable Redis price caching (10 min TTL)
+  setPriceCache(redis);
   const srcIndexer = new Indexer(solana, redis, clickhouse, "OrderCreated");
   const dstIndexer = new Indexer(solana, redis, clickhouse, "OrderFulfilled");
   async function shutdown(code: number): Promise<void> {

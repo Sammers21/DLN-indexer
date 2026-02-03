@@ -1,9 +1,13 @@
 export type ProgramType = "src" | "dst";
 
-export interface Checkpoint {
-    lastSignature: string;
+export interface CheckpointBoundary {
+    signature: string;
     blockTime: number;
-    blockTimeFormatted?: string;
+}
+
+export interface Checkpoint {
+    from: CheckpointBoundary;  // oldest indexed signature
+    to: CheckpointBoundary;    // newest indexed signature
 }
 
 export interface CheckpointStore {

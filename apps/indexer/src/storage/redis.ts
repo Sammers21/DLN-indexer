@@ -5,13 +5,33 @@ import { Checkpoint, CheckpointStore, ProgramType } from "../checkpoint";
 const logger = createLogger("redis");
 
 const CHECKPOINT_PREFIX = "indexer:checkpoint:";
+const PRICE_PREFIX = "price:";
+const PRICE_TTL_SECONDS = 600; // 10 minutes
+
+function formatBlockTime(timestamp: number): string {
+    return new Date(timestamp * 1000).toLocaleString("en-US", {
+        year: "numeric",
+        month: "short",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+    });
+}
 
 export class Redis implements CheckpointStore {
-    private readonly client: IORedis;
+    private readonly client: IORedis;      // db 0 - checkpoints
+    private readonly priceClient: IORedis; // db 1 - prices
     constructor(url?: string) {
-        this.client = new IORedis(url ?? config.redis.url);
-        this.client.on("connect", () => logger.info("Redis connected"));
-        this.client.on("error", (err) => logger.error({ err }, "Redis error"));
+        const redisUrl = url ?? config.redis.url;
+        this.client = new IORedis(redisUrl);
+        this.client.on("connect", () => logger.info("Redis db 0 (checkpoints) connected"));
+        this.client.on("error", (err) => logger.error({ err }, "Redis db 0 error"));
+        // Price client on db 1
+        this.priceClient = new IORedis(redisUrl, { db: 1 });
+        this.priceClient.on("connect", () => logger.info("Redis db 1 (prices) connected"));
+        this.priceClient.on("error", (err) => logger.error({ err }, "Redis db 1 error"));
     }
     async getCheckpoint(program: ProgramType): Promise<Checkpoint | null> {
         const data = await this.client.get(`${CHECKPOINT_PREFIX}${program}`);
@@ -24,22 +44,36 @@ export class Redis implements CheckpointStore {
     }
     async setCheckpoint(program: ProgramType, checkpoint: Checkpoint): Promise<void> {
         const data = {
-            ...checkpoint,
-            blockTimeFormatted: new Date(checkpoint.blockTime * 1000).toLocaleString("en-US", {
-                year: "numeric",
-                month: "short",
-                day: "2-digit",
-                hour: "2-digit",
-                minute: "2-digit",
-                second: "2-digit",
-                hour12: false,
-            }),
+            from: {
+                ...checkpoint.from,
+                blockTimeFormatted: formatBlockTime(checkpoint.from.blockTime),
+            },
+            to: {
+                ...checkpoint.to,
+                blockTimeFormatted: formatBlockTime(checkpoint.to.blockTime),
+            },
         };
         await this.client.set(`${CHECKPOINT_PREFIX}${program}`, JSON.stringify(data));
         logger.debug({ program, checkpoint: data }, "Checkpoint saved");
     }
     async close(): Promise<void> {
-        await this.client.quit();
+        await Promise.all([this.client.quit(), this.priceClient.quit()]);
         logger.info("Redis closed");
+    }
+    // Price caching methods (db 1)
+    async getCachedPrice(tokenKey: string): Promise<number | null> {
+        const data = await this.priceClient.get(`${PRICE_PREFIX}${tokenKey}`);
+        if (!data) return null;
+        try {
+            const price = parseFloat(data);
+            logger.debug({ tokenKey, price }, "Price cache hit");
+            return price;
+        } catch {
+            return null;
+        }
+    }
+    async setCachedPrice(tokenKey: string, price: number): Promise<void> {
+        await this.priceClient.setex(`${PRICE_PREFIX}${tokenKey}`, PRICE_TTL_SECONDS, price.toString());
+        logger.debug({ tokenKey, price, ttl: PRICE_TTL_SECONDS }, "Price cached");
     }
 }
