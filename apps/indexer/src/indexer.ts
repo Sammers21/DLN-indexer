@@ -5,6 +5,7 @@ import { Checkpoint, CheckpointBoundary, CheckpointStore, ProgramType } from "./
 import { SolanaClient } from "./solana";
 import { getUsdValue } from "./price";
 import { getUsdValueFromDlnApi } from "./dln-api";
+import { extractCreatedOrderId, extractFulfilledOrderId } from "./parser";
 
 const logger = createLogger("indexer");
 
@@ -49,12 +50,6 @@ interface CreatedOrderData {
     order: DlnOrder;
     fixFee: bigint;
     percentFee: bigint;
-}
-
-// Fulfilled event data
-interface FulfilledData {
-    orderId: number[];
-    taker: PublicKey;
 }
 
 const DLN_SRC = new PublicKey(config.dln.srcProgramId);
@@ -221,15 +216,12 @@ export class Indexer {
         txBlockTime: number
     ): Promise<Order | null> {
         let createdOrderData: CreatedOrderData | null = null;
-        let orderId: string | null = null;
         for (const event of eventsList) {
             if (event.name === "CreatedOrder") {
                 createdOrderData = event.data as unknown as CreatedOrderData;
-            } else if (event.name === "CreatedOrderId") {
-                const data = event.data as unknown as { orderId: number[] };
-                orderId = Buffer.from(data.orderId).toString("hex");
             }
         }
+        const orderId = extractCreatedOrderId(eventsList);
         if (!createdOrderData || !orderId) return null;
         // Calculate USD value
         const giveTokenBytes = createdOrderData.order.give.tokenAddress;
@@ -252,25 +244,20 @@ export class Indexer {
         sigInfo: ConfirmedSignatureInfo,
         txBlockTime: number
     ): Promise<Order | null> {
-        for (const event of eventsList) {
-            if (event.name !== "Fulfilled") continue;
-            const data = event.data as unknown as FulfilledData;
-            const orderId = Buffer.from(data.orderId).toString("hex");
-            // Fetch USD value from DLN API
-            const pricing = await getUsdValueFromDlnApi(orderId);
-            const order: Order = {
-                orderId,
-                signature: sigInfo.signature,
-                time: txBlockTime,
-                usdValue: pricing.usdValue,
-                pricingStatus: pricing.pricingStatus,
-                pricingError: pricing.pricingError,
-                kind: this.kind,
-            };
-            await this.analytics.insertOrders([order]);
-            return order;
-        }
-        return null;
+        const orderId = extractFulfilledOrderId(eventsList);
+        if (!orderId) return null;
+        const pricing = await getUsdValueFromDlnApi(orderId);
+        const order: Order = {
+            orderId,
+            signature: sigInfo.signature,
+            time: txBlockTime,
+            usdValue: pricing.usdValue,
+            pricingStatus: pricing.pricingStatus,
+            pricingError: pricing.pricingError,
+            kind: this.kind,
+        };
+        await this.analytics.insertOrders([order]);
+        return order;
     }
     private async updateCheckpoint(sigInfo: ConfirmedSignatureInfo, direction: Direction): Promise<void> {
         const now = Date.now();

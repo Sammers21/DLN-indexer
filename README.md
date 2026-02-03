@@ -34,10 +34,16 @@ A production-ready application that indexes DLN (deBridge Liquidity Network) ord
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
-│                    Dashboard (Hono + React)                      │
+│                        API Service (Hono)                        │
 │  ┌──────────────────────────────────────────────────────────┐   │
-│  │  Hono API: /api/orders  /api/volumes  /api/volumes/daily │   │
-│  │  React UI: Daily charts, Order table, Date filtering     │   │
+│  │  /api/default_range  /api/volume/:kind                   │   │
+│  └──────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│                        Dashboard (React)                         │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │  Daily charts, Date filtering                             │   │
 │  └──────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -71,7 +77,7 @@ This ensures:
 | Database  | ClickHouse           | Column-oriented OLAP, fast aggregations |
 | Cache     | Redis                | Checkpoints (db 0) + Price cache (db 1) |
 | Pricing   | Jupiter Price API V3 | Real-time Solana token prices           |
-| Web       | Hono + React + Vite  | Lightweight server + modern frontend    |
+| Web       | Hono + React + Vite  | API server + React dashboard            |
 | Charts    | Recharts             | React-based charting library            |
 | Monorepo  | Turborepo            | Fast builds, smart caching              |
 | Testing   | Mocha + Chai         | Mature, flexible test framework         |
@@ -128,23 +134,31 @@ The indexer will:
 6. Cache prices in Redis (10 min TTL)
 7. Store in ClickHouse
 
-### 5. Start the Dashboard (API + UI)
+### 5. Start the API
+
+```bash
+bun run api
+```
+
+API available at http://localhost:3000
+
+### 6. Start the Dashboard (UI)
 
 ```bash
 bun run dashboard
 ```
 
-Dashboard available at http://localhost:5173 (dev mode with Vite)
+Dashboard available at http://localhost:5173 (Vite dev server)
 
 For production:
 
 ```bash
 cd apps/dashboard
 bun run build
-bun run start
+bun run preview
 ```
 
-Dashboard available at http://localhost:3000 (Hono server)
+Dashboard preview available at http://localhost:4173
 
 ## Project Structure
 
@@ -158,13 +172,13 @@ dln-indexer/
 │   │       ├── solana.ts    # Rate-limited Solana client
 │   │       ├── price.ts     # Jupiter V3 price fetching + Redis cache
 │   │       ├── dln-api.ts   # DLN API for OrderFulfilled USD values
-│   │       ├── analytics/   # ClickHouse analytics
 │   │       ├── checkpoint/  # Checkpoint interfaces
-│   │       └── storage/     # Redis & ClickHouse implementations
-│   └── dashboard/           # Hono + React dashboard (single app)
+│   │       └── storage/     # Redis checkpoint + price cache
+│   ├── api/                 # Hono API server
+│   │   └── src/
+│   │       └── index.ts     # API routes
+│   └── dashboard/           # React dashboard (Vite)
 │       └── src/
-│           ├── server/      # Hono API server
-│           │   └── index.ts # API routes + static serving
 │           └── client/      # React frontend
 │               ├── App.tsx  # Dashboard UI
 │               └── main.tsx # React entry point
@@ -186,25 +200,22 @@ dln-indexer/
 
 ## API Endpoints
 
-### Health Check
+### Default Range
 
 ```
-GET /health
+GET /api/default_range
 ```
 
-### Orders
+### Daily Volume
 
 ```
-GET /api/orders?page=1&limit=50&event_type=created&start_date=2024-01-01&end_date=2024-12-31
+GET /api/volume/:kind?from=2024-01-01&to=2024-12-31
 ```
 
-### Volumes
+Valid `:kind` values:
 
-```
-GET /api/volumes?start_date=2024-01-01&end_date=2024-12-31
-GET /api/volumes/daily
-GET /api/volumes/summary
-```
+- `createOrder`
+- `fulfilled`
 
 ## DLN Contract Addresses
 
@@ -261,8 +272,8 @@ Using Anchor's `BorshCoder` and `EventParser` to deserialize events from transac
 ## Running Tests
 
 ```bash
-bun test        # Watch mode
-bun test:run    # Single run
+bun run test        # Run tests via Turbo
+bun run test:run    # Single run via Turbo
 ```
 
 ## Development Commands
@@ -276,13 +287,12 @@ bun run dev
 
 # Run specific app
 bun run indexer    # Run indexer
+bun run api        # Run Hono API (port 3000)
+bun run api:dev    # Run Hono API with watch mode
 bun run dashboard  # Run dashboard (Vite dev server + API proxy)
 
 # Build all packages
 bun run build
-
-# Run dashboard in production mode
-bun run dashboard:server
 
 # Run all tests
 bun run test
