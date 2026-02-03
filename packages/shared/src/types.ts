@@ -1,4 +1,5 @@
 export type OrderKind = "OrderCreated" | "OrderFulfilled";
+export type OrderEventType = "created" | "fulfilled";
 
 export interface Order {
     orderId: string;
@@ -14,11 +15,8 @@ export interface Analytics {
     close(): Promise<void>;
 }
 
-export type VolumeInterval = "day" | "hour" | "15min";
-
-export interface VolumeData {
+export interface DailyVolume {
     period: string;
-    event_type: string;
     order_count: number;
     volume_usd: number;
 }
