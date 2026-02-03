@@ -5,29 +5,29 @@ import type { OrderEventType } from "@dln/shared";
 const logger = createLogger("api");
 
 const volumeKinds: Record<string, OrderEventType> = {
-    fulfilled: "fulfilled",
-    createOrder: "created",
+  fulfilled: "fulfilled",
+  createOrder: "created",
 };
 
 export function createApp(clickhouse: Clickhouse): Hono {
-    const app = new Hono();
+  const app = new Hono();
 
-    app.get("/api/default_range", async (c) => {
-        const range = await clickhouse.getDefaultRange();
-        return c.json(range);
-    });
+  app.get("/api/default_range", async (c) => {
+    const range = await clickhouse.getDefaultRange();
+    return c.json(range);
+  });
 
-    app.get("/api/volume/:kind", async (c) => {
-        const kind = c.req.param("kind");
-        const eventType = volumeKinds[kind];
-        if (!eventType) return c.json({ error: "Invalid volume kind" }, 400);
-        const from = c.req.query("from");
-        const to = c.req.query("to");
-        const volumes = await clickhouse.getDailyVolume({ eventType, from, to });
-        return c.json(volumes);
-    });
+  app.get("/api/volume/:kind", async (c) => {
+    const kind = c.req.param("kind");
+    const eventType = volumeKinds[kind];
+    if (!eventType) return c.json({ error: "Invalid volume kind" }, 400);
+    const from = c.req.query("from");
+    const to = c.req.query("to");
+    const volumes = await clickhouse.getDailyVolume({ eventType, from, to });
+    return c.json(volumes);
+  });
 
-    return app;
+  return app;
 }
 
 // Start server
@@ -36,6 +36,6 @@ const app = createApp(clickhouse);
 const port = config.api.port;
 logger.info({ port }, "API server starting");
 export default {
-    port,
-    fetch: app.fetch,
+  port,
+  fetch: app.fetch,
 };

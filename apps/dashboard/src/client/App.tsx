@@ -26,7 +26,10 @@ function sumVolumeUsd(rows: VolumeRow[]): number {
 }
 
 function maxVolumeUsd(rows: VolumeRow[]): number {
-  return rows.reduce((max, row) => (row.volume_usd > max ? row.volume_usd : max), 0);
+  return rows.reduce(
+    (max, row) => (row.volume_usd > max ? row.volume_usd : max),
+    0,
+  );
 }
 
 function niceCeil(value: number): number {
@@ -50,13 +53,19 @@ function App() {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [rangeLoaded, setRangeLoaded] = useState(false);
-  const createdTotalUsd = useMemo(() => sumVolumeUsd(createdVolumes), [createdVolumes]);
+  const createdTotalUsd = useMemo(
+    () => sumVolumeUsd(createdVolumes),
+    [createdVolumes],
+  );
   const fulfilledTotalUsd = useMemo(
     () => sumVolumeUsd(fulfilledVolumes),
-    [fulfilledVolumes]
+    [fulfilledVolumes],
   );
   const yDomain = useMemo((): [number, number | "auto"] => {
-    const max = Math.max(maxVolumeUsd(createdVolumes), maxVolumeUsd(fulfilledVolumes));
+    const max = Math.max(
+      maxVolumeUsd(createdVolumes),
+      maxVolumeUsd(fulfilledVolumes),
+    );
     if (max <= 0) return [0, "auto"];
     return [0, niceCeil(max * 1.05)];
   }, [createdVolumes, fulfilledVolumes]);
@@ -151,15 +160,38 @@ function App() {
               <div className="loading">Loading chart data...</div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={createdVolumes} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                <BarChart
+                  data={createdVolumes}
+                  margin={{ top: 8, right: 12, left: 0, bottom: 0 }}
+                >
                   <defs>
-                    <linearGradient id="createdGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#6366f1" stopOpacity={0.95} />
-                      <stop offset="100%" stopColor="#4338ca" stopOpacity={0.65} />
+                    <linearGradient
+                      id="createdGradient"
+                      x1="0"
+                      y1="0"
+                      x2="0"
+                      y2="1"
+                    >
+                      <stop
+                        offset="0%"
+                        stopColor="#6366f1"
+                        stopOpacity={0.95}
+                      />
+                      <stop
+                        offset="100%"
+                        stopColor="#4338ca"
+                        stopOpacity={0.65}
+                      />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(148, 163, 184, 0.35)" />
-                  <XAxis dataKey="period" tick={{ fontSize: 12, fill: "#475569" }} />
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke="rgba(148, 163, 184, 0.35)"
+                  />
+                  <XAxis
+                    dataKey="period"
+                    tick={{ fontSize: 12, fill: "#475569" }}
+                  />
                   <YAxis
                     domain={yDomain}
                     tick={{ fontSize: 12, fill: "#475569" }}
@@ -168,7 +200,7 @@ function App() {
                     width={72}
                   />
                   <Tooltip
-                    formatter={(value: number) => formatUsd(value)}
+                    formatter={(value?: number) => formatUsd(value ?? 0)}
                     labelStyle={{ fontWeight: 600 }}
                     contentStyle={{
                       background: "rgba(15, 23, 42, 0.92)",
@@ -178,7 +210,11 @@ function App() {
                     }}
                     itemStyle={{ color: "#e2e8f0" }}
                   />
-                  <Bar dataKey="volume_usd" fill="url(#createdGradient)" radius={[8, 8, 0, 0]} />
+                  <Bar
+                    dataKey="volume_usd"
+                    fill="url(#createdGradient)"
+                    radius={[8, 8, 0, 0]}
+                  />
                 </BarChart>
               </ResponsiveContainer>
             )}
@@ -197,15 +233,34 @@ function App() {
               <div className="loading">Loading chart data...</div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={fulfilledVolumes} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                <BarChart
+                  data={fulfilledVolumes}
+                  margin={{ top: 8, right: 12, left: 0, bottom: 0 }}
+                >
                   <defs>
-                    <linearGradient id="fulfilledGradient" x1="0" y1="0" x2="0" y2="1">
+                    <linearGradient
+                      id="fulfilledGradient"
+                      x1="0"
+                      y1="0"
+                      x2="0"
+                      y2="1"
+                    >
                       <stop offset="0%" stopColor="#34d399" stopOpacity={0.9} />
-                      <stop offset="100%" stopColor="#059669" stopOpacity={0.6} />
+                      <stop
+                        offset="100%"
+                        stopColor="#059669"
+                        stopOpacity={0.6}
+                      />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(148, 163, 184, 0.35)" />
-                  <XAxis dataKey="period" tick={{ fontSize: 12, fill: "#475569" }} />
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke="rgba(148, 163, 184, 0.35)"
+                  />
+                  <XAxis
+                    dataKey="period"
+                    tick={{ fontSize: 12, fill: "#475569" }}
+                  />
                   <YAxis
                     domain={yDomain}
                     tick={{ fontSize: 12, fill: "#475569" }}
@@ -214,7 +269,7 @@ function App() {
                     width={72}
                   />
                   <Tooltip
-                    formatter={(value: number) => formatUsd(value)}
+                    formatter={(value?: number) => formatUsd(value ?? 0)}
                     labelStyle={{ fontWeight: 600 }}
                     contentStyle={{
                       background: "rgba(15, 23, 42, 0.92)",
@@ -224,7 +279,11 @@ function App() {
                     }}
                     itemStyle={{ color: "#e2e8f0" }}
                   />
-                  <Bar dataKey="volume_usd" fill="url(#fulfilledGradient)" radius={[8, 8, 0, 0]} />
+                  <Bar
+                    dataKey="volume_usd"
+                    fill="url(#fulfilledGradient)"
+                    radius={[8, 8, 0, 0]}
+                  />
                 </BarChart>
               </ResponsiveContainer>
             )}
