@@ -1,5 +1,4 @@
 import { Hono } from "hono";
-import { serve } from "@hono/node-server";
 import { config, createLogger, getOrders, getDailyVolumes, getVolumeSummary } from "@dln/shared";
 
 const logger = createLogger("api");
@@ -65,6 +64,7 @@ app.get("/api/volumes/summary", async (c) => {
 // Start server
 const port = config.api.port;
 logger.info({ port }, "API server starting");
-serve({ fetch: app.fetch, port }, (info) => {
-    logger.info({ port: info.port }, "API server started");
-});
+export default {
+    port,
+    fetch: app.fetch,
+};
