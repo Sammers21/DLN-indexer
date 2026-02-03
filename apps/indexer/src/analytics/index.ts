@@ -1,2 +1,2 @@
 export * from "./analytics";
-export * from "./clickhouse";
+export * from "../storage/clickhouse";

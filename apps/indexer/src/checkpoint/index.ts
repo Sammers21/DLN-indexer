@@ -1,2 +1,2 @@
 export * from "./checkpoint";
-export * from "./redis";
+export * from "../storage/redis";

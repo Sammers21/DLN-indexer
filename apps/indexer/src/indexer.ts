@@ -5,6 +5,7 @@ import { Checkpoint, CheckpointStore, ProgramType } from "./checkpoint";
 import { Analytics, Order, OrderKind } from "./analytics";
 import { SolanaClient } from "./solana";
 import { getUsdValue } from "./price";
+import { OrderStorage } from "./storage";
 
 const logger = createLogger("indexer");
 
@@ -76,6 +77,7 @@ export class Indexer {
     private readonly solana: SolanaClient;
     private readonly checkpointStore: CheckpointStore;
     private readonly analytics: Analytics;
+    private readonly orderStorage: OrderStorage;
     private readonly kind: OrderKind;
     private readonly programId: PublicKey;
     private readonly programType: ProgramType;
@@ -86,11 +88,13 @@ export class Indexer {
         solana: SolanaClient,
         checkpointStore: CheckpointStore,
         analytics: Analytics,
+        orderStorage: OrderStorage,
         kind: OrderKind
     ) {
         this.solana = solana;
         this.checkpointStore = checkpointStore;
         this.analytics = analytics;
+        this.orderStorage = orderStorage;
         this.kind = kind;
         this.programId = kind === "OrderCreated" ? DLN_SRC : DLN_DST;
         this.programType = kind === "OrderCreated" ? "src" : "dst";
@@ -140,6 +144,12 @@ export class Indexer {
                 // Batch insert all orders
                 if (allOrders.length > 0) {
                     await this.analytics.insertOrders(allOrders);
+                    // Save OrderCreated to storage for later lookup by OrderFulfilled
+                    if (this.kind === "OrderCreated") {
+                        for (const order of allOrders) {
+                            await this.orderStorage.saveOrder(order);
+                        }
+                    }
                     for (const order of allOrders) {
                         logger.info({
                             signature: order.signature,
@@ -233,17 +243,25 @@ export class Indexer {
                     });
                 }
             } else {
-                // For OrderFulfilled, the Fulfilled event has orderId directly
-                // Note: We could look up the original order's USD value from DB, but for now use 0
+                // For OrderFulfilled, look up the original order's USD value from storage
                 for (const event of eventsList) {
                     if (event.name === "Fulfilled") {
                         const data = event.data as unknown as FulfilledData;
                         const orderId = Buffer.from(data.orderId).toString("hex");
+                        // Look up the original OrderCreated to get its USD value
+                        let usdValue = 0;
+                        const storedOrder = await this.orderStorage.findOrderById(orderId);
+                        if (storedOrder) {
+                            usdValue = storedOrder.usdValue;
+                            logger.debug({ orderId, usdValue }, "Found original order USD value");
+                        } else {
+                            logger.debug({ orderId }, "Original order not found in storage");
+                        }
                         orders.push({
                             orderId,
                             signature: sigInfo.signature,
                             time: sigInfo.blockTime ?? Math.floor(Date.now() / 1000),
-                            usdValue: 0, // Fulfilled events don't have amount data
+                            usdValue,
                             kind: this.kind,
                         });
                     }

@@ -1,10 +1,11 @@
 import { createClient, ClickHouseClient } from "@clickhouse/client";
 import { config, createLogger } from "@dln/shared";
-import { Analytics, Order, OrderKind } from "./analytics";
+import { Analytics, Order, OrderKind } from "../analytics";
+import { OrderStorage } from "./storage";
 
 const logger = createLogger("clickhouse");
 
-export class ClickHouseAnalytics implements Analytics {
+export class Clickhouse implements Analytics, OrderStorage {
     private readonly client: ClickHouseClient;
     constructor(host?: string) {
         this.client = createClient({
@@ -15,6 +16,7 @@ export class ClickHouseAnalytics implements Analytics {
         });
         logger.info("ClickHouse client initialized");
     }
+    // Analytics implementation
     async insertOrders(orders: Order[]): Promise<void> {
         if (orders.length === 0) return;
         const values = orders.map((order) => ({
@@ -40,6 +42,46 @@ export class ClickHouseAnalytics implements Analytics {
         });
         const rows = (await result.json()) as Array<{ cnt: string }>;
         return rows.length > 0 ? parseInt(rows[0].cnt, 10) : 0;
+    }
+    // OrderStorage implementation
+    async findOrderById(orderId: string): Promise<Order | null> {
+        try {
+            const result = await this.client.query({
+                query: `
+                    SELECT order_id, tx_signature, block_time, usd_value
+                    FROM orders
+                    WHERE order_id = {orderId:String} AND event_type = 'created'
+                    LIMIT 1
+                `,
+                query_params: { orderId },
+                format: "JSONEachRow",
+            });
+            const rows = (await result.json()) as Array<{
+                order_id: string;
+                tx_signature: string;
+                block_time: string;
+                usd_value: number;
+            }>;
+            if (rows.length === 0) {
+                return null;
+            }
+            const row = rows[0];
+            const order: Order = {
+                orderId: row.order_id,
+                signature: row.tx_signature,
+                time: Math.floor(new Date(row.block_time).getTime() / 1000),
+                usdValue: row.usd_value,
+                kind: "OrderCreated",
+            };
+            logger.debug({ orderId }, "Order found in ClickHouse");
+            return order;
+        } catch (err) {
+            logger.warn({ err, orderId }, "Failed to find order in ClickHouse");
+            return null;
+        }
+    }
+    async saveOrder(order: Order): Promise<void> {
+        await this.insertOrders([order]);
     }
     async close(): Promise<void> {
         await this.client.close();
