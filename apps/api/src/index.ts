@@ -1,9 +1,8 @@
 import { Hono } from "hono";
 import { serve } from "@hono/node-server";
-import { serveStatic } from "@hono/node-server/serve-static";
 import { config, createLogger, getOrders, getDailyVolumes, getVolumeSummary } from "@dln/shared";
 
-const logger = createLogger("dashboard");
+const logger = createLogger("api");
 const app = new Hono();
 
 // API routes
@@ -63,15 +62,9 @@ app.get("/api/volumes/summary", async (c) => {
     return c.json(summary);
 });
 
-// Serve static files in production
-app.use("/*", serveStatic({ root: "./dist/client" }));
-app.get("*", serveStatic({ path: "./dist/client/index.html" }));
-
 // Start server
 const port = config.api.port;
-logger.info({ port }, "Dashboard server starting");
+logger.info({ port }, "API server starting");
 serve({ fetch: app.fetch, port }, (info) => {
-    logger.info({ port: info.port }, "Dashboard server started");
+    logger.info({ port: info.port }, "API server started");
 });
-
-export default app;

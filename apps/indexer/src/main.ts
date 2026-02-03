@@ -1,7 +1,7 @@
-import { config, createLogger } from "@dln/shared";
+import { config, createLogger, Clickhouse } from "@dln/shared";
 import { Indexer } from "./indexer";
 import { SolanaClient } from "./solana";
-import { Redis, Clickhouse } from "./storage";
+import { Redis } from "./storage";
 import { setPriceCache } from "./price";
 
 const logger = createLogger("indexer");

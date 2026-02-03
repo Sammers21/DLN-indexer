@@ -1,8 +1,7 @@
 import { PublicKey, ConfirmedSignatureInfo, VersionedTransactionResponse } from "@solana/web3.js";
 import { BorshCoder, EventParser } from "@coral-xyz/anchor";
-import { config, createLogger, DLN_SRC_IDL, DLN_DST_IDL } from "@dln/shared";
+import { config, createLogger, DLN_SRC_IDL, DLN_DST_IDL, Analytics, Order, OrderKind } from "@dln/shared";
 import { Checkpoint, CheckpointBoundary, CheckpointStore, ProgramType } from "./checkpoint";
-import { Analytics, Order, OrderKind } from "./analytics";
 import { SolanaClient } from "./solana";
 import { getUsdValue } from "./price";
 import { getUsdValueFromDlnApi } from "./dln-api";

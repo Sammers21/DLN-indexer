@@ -58,7 +58,7 @@ const prettyFormat = printf(({ level, message, timestamp, name, ...meta }) => {
 });
 
 // Base logger configuration
-export const logger = winston.createLogger({
+const logger = winston.createLogger({
     level: process.env.LOG_LEVEL || "info",
     format: combine(
         errors({ stack: true }),

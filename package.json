@@ -16,8 +16,9 @@
     "format": "prettier --write \"**/*.{ts,tsx,json,md}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,json,md}\"",
     "indexer": "bun run --filter=@dln/indexer start",
-    "dashboard": "bun run --filter=@dln/dashboard dev",
-    "dashboard:server": "bun run --filter=@dln/dashboard start"
+    "api": "bun run --filter=@dln/api start",
+    "api:dev": "bun run --filter=@dln/api dev",
+    "dashboard": "bun run --filter=@dln/dashboard dev"
   },
   "devDependencies": {
     "prettier": "^3.4.2",
