@@ -4,24 +4,24 @@ This document provides context for AI coding agents working on this project.
 
 ## Project Overview
 
-DLN Indexer is a **Solana blockchain indexer** that tracks DLN (deBridge Liquidity Network) cross-chain order events. It consists of three applications in a Turborepo monorepo:
+DLN Indexer is a **Solana blockchain indexer** that tracks DLN (deBridge Liquidity Network) cross-chain order events. It consists of two applications in a Turborepo monorepo:
 
 1. **Indexer** - Fetches and parses blockchain transactions
-2. **API** - REST API for querying indexed data
-3. **Dashboard** - React visualization of volumes and orders
+2. **Dashboard** - Hono API + React UI for querying and visualizing indexed data
 
 ## Technology Stack
 
-| Layer    | Technology       | Notes                                           |
-| -------- | ---------------- | ----------------------------------------------- |
-| Runtime  | **Bun**          | Use `bun` for all commands, not `npm` or `yarn` |
-| Language | **TypeScript**   | ESM modules (`.js` extensions in imports)       |
-| Database | **ClickHouse**   | Column-oriented OLAP database                   |
-| Cache    | **Redis**        | Checkpoint storage only                         |
-| API      | **Fastify**      | v5.x with TypeScript                            |
-| Frontend | **React + Vite** | With Recharts for charts                        |
-| Testing  | **Mocha + Chai** | Test files in `test/` directories               |
-| Monorepo | **Turborepo**    | Workspace management                            |
+| Layer    | Technology       | Notes                                            |
+| -------- | ---------------- | ------------------------------------------------ |
+| Runtime  | **Bun**          | Use `bun` for all commands, not `npm` or `yarn`  |
+| Language | **TypeScript**   | ESM modules (`.js` extensions in imports)        |
+| Database | **ClickHouse**   | Column-oriented OLAP database                    |
+| Cache    | **Redis**        | db 0: Checkpoints, db 1: Price cache (10min TTL) |
+| Pricing  | **Jupiter V3**   | API key required from portal.jup.ag              |
+| Web      | **Hono**         | Lightweight web framework, serves API + static   |
+| Frontend | **React + Vite** | With Recharts for charts                         |
+| Testing  | **Mocha + Chai** | Test files in `test/` directories                |
+| Monorepo | **Turborepo**    | Workspace management                             |
 
 ## Project Structure
 
@@ -33,18 +33,19 @@ dln-indexer/
 │   │   │   ├── main.ts       # Entry point - orchestrates indexing
 │   │   │   ├── indexer.ts    # Core Indexer class with bidirectional logic
 │   │   │   ├── solana.ts     # Rate-limited Solana RPC client
-│   │   │   ├── price.ts      # Jupiter price fetching
+│   │   │   ├── price.ts      # Jupiter V3 price fetching + Redis cache
+│   │   │   ├── dln-api.ts    # DLN API for OrderFulfilled USD values
 │   │   │   ├── analytics/    # Analytics interface & types
 │   │   │   ├── checkpoint/   # Checkpoint interfaces
-│   │   │   └── storage/      # Redis (checkpoint) & ClickHouse (analytics)
+│   │   │   └── storage/      # Redis (checkpoint + prices) & ClickHouse
 │   │   └── test/
-│   ├── api/                  # REST API server
-│   │   ├── src/
-│   │   │   ├── main.ts       # Fastify server setup
-│   │   │   └── routes/       # API route handlers
-│   │   └── test/
-│   └── dashboard/            # React frontend
+│   └── dashboard/            # Hono + React dashboard
 │       └── src/
+│           ├── server/       # Hono API server
+│           │   └── index.ts  # API routes + static file serving
+│           └── client/       # React frontend
+│               ├── App.tsx   # Dashboard UI
+│               └── main.tsx  # React entry point
 ├── packages/
 │   └── shared/               # Shared library (@dln/shared)
 │       └── src/
@@ -71,15 +72,28 @@ dln-indexer/
 - Uses Anchor's `BorshCoder` and `EventParser` to deserialize events from transaction logs
 - IDLs are in `packages/shared/src/idls/` - these define the on-chain program structures
 - For `OrderCreated`: Both `CreatedOrder` (contains token amounts) and `CreatedOrderId` (contains orderId) events are parsed from the same transaction
-- USD value is calculated for `OrderCreated` using Jupiter Price API
-- `OrderFulfilled` events are stored with `usdValue = -1`
+- USD value is calculated for `OrderCreated` using Jupiter Price API V3
+- For `OrderFulfilled`: USD value fetched via DLN API (gets cross-chain order details) + Jupiter prices
+
+### Price Fetching
+
+- **Jupiter V3 API**: Requires API key from [portal.jup.ag](https://portal.jup.ag)
+- **Redis Cache**: Prices cached in db 1 with 10-minute TTL
+- **Flow**: Redis cache → Jupiter API → cache result
+- **Tokens**: Supports any Solana SPL token that Jupiter supports
 
 ### Data Flow
 
 ```
 Solana RPC → Indexer → Event Parser → ClickHouse (Analytics)
                             ↓
-                    Redis (Checkpoint)
+              ┌─────────────┴─────────────┐
+              ↓                           ↓
+      Redis db 0 (Checkpoint)    Redis db 1 (Price Cache)
+                                          ↑
+                                   Jupiter V3 API
+                                          ↑
+                              DLN API (for OrderFulfilled)
 ```
 
 ### Bidirectional Indexing
@@ -125,8 +139,10 @@ cd infra && docker compose up -d
 
 # Run apps
 bun run indexer     # Start blockchain indexer
-bun run api         # Start API server (port 3000)
-bun run dashboard   # Start dashboard dev server (port 5173)
+bun run dashboard   # Start dashboard (Vite dev + API proxy to port 3000)
+
+# For production
+cd apps/dashboard && bun run build && bun run start  # Hono server on port 3000
 
 # Testing
 bun run test        # Watch mode
@@ -134,7 +150,7 @@ bun run test:run    # Single run
 
 # Type checking
 bunx tsc --noEmit -p apps/indexer/tsconfig.json
-bunx tsc --noEmit -p apps/api/tsconfig.json
+bunx tsc --noEmit -p apps/dashboard/tsconfig.json
 bunx tsc --noEmit -p packages/shared/tsconfig.json
 ```
 
@@ -179,19 +195,29 @@ usd_value       Float64     -- USD value (from Jupiter API, -1 for fulfilled)
 - **`Indexer`** (`indexer.ts`) - Core indexing logic
   - `startIndexing()` - Main loop with bidirectional fetching
   - `handleSignature()` - Process single transaction
-  - `processOrderCreated()` - Parse and enrich with USD value
-  - `processOrderFulfilled()` - Parse (usdValue = -1)
+  - `processOrderCreated()` - Parse and enrich with USD value via Jupiter
+  - `processOrderFulfilled()` - Parse and enrich via DLN API + Jupiter
   - `updateCheckpoint()` - Update from/to boundaries
 
 - **`SolanaClient`** (`solana.ts`) - Rate-limited RPC client
   - Uses `bottleneck` for rate limiting
   - Logs request time for each call
 
-- **`Redis`** (`storage/redis.ts`) - Checkpoint storage
+- **`Redis`** (`storage/redis.ts`) - Checkpoint + price cache
   - Implements `CheckpointStore` interface
+  - db 0: Checkpoints
+  - db 1: Price cache (10min TTL)
 
 - **`Clickhouse`** (`storage/clickhouse.ts`) - Order storage
   - Implements `Analytics` interface
+
+- **`price.ts`** - Jupiter V3 price fetching
+  - `getTokenPrice(mint)` - Get price with Redis caching
+  - `getTokenDecimals(mint)` - Get decimals for known tokens
+
+- **`dln-api.ts`** - DLN API integration
+  - `getUsdValueFromDlnApi(orderId)` - Get USD value for fulfilled orders
+  - Fetches cross-chain order details, then uses Jupiter for Solana token price
 
 ### Interfaces
 
@@ -218,14 +244,12 @@ interface Order {
 }
 ```
 
-## API Endpoints
+## API Endpoints (Hono)
 
 | Endpoint                   | Description                |
 | -------------------------- | -------------------------- |
-| `GET /health`              | Health check               |
+| `GET /api/health`          | Health check               |
 | `GET /api/orders`          | Paginated orders list      |
-| `GET /api/orders/:orderId` | Single order by ID         |
-| `GET /api/volumes`         | Volume data with summary   |
 | `GET /api/volumes/daily`   | Daily volumes for charting |
 | `GET /api/volumes/summary` | Aggregate statistics       |
 
@@ -237,6 +261,7 @@ Key variables (see `.env.example`):
 - `SOLANA_RPS` - Requests per second limit (default: 10)
 - `CLICKHOUSE_HOST` - ClickHouse HTTP endpoint
 - `REDIS_URL` - Redis connection string
+- `JUPITER_API_KEY` - Jupiter V3 API key from [portal.jup.ag](https://portal.jup.ag)
 - `INDEXER_BATCH_SIZE` - Signatures per batch (default: 5)
 - `INDEXER_DELAY_MS` - Delay when no signatures (default: 10000ms)
 
@@ -244,9 +269,8 @@ Key variables (see `.env.example`):
 
 ### Adding a new API endpoint
 
-1. Add route handler in `apps/api/src/routes/`
-2. Register in `apps/api/src/server.ts`
-3. Add types to `packages/shared/src/types.ts` if needed
+1. Add route in `apps/dashboard/src/server/index.ts`
+2. Add types to `packages/shared/src/types.ts` if needed
 
 ### Adding a new service
 
@@ -262,11 +286,18 @@ Key variables (see `.env.example`):
 ### Resetting checkpoints
 
 ```bash
-# Connect to Redis
+# Connect to Redis db 0 (checkpoints)
 redis-cli -a <password>
-# Delete checkpoints
 DEL indexer:checkpoint:src
 DEL indexer:checkpoint:dst
+```
+
+### Clearing price cache
+
+```bash
+# Connect to Redis db 1 (prices)
+redis-cli -a <password> -n 1
+FLUSHDB
 ```
 
 ## Testing Guidelines
@@ -315,3 +346,10 @@ describe("Feature", () => {
 
 - Check Redis: `redis-cli -a <password> GET indexer:checkpoint:src`
 - Delete to restart: `DEL indexer:checkpoint:src indexer:checkpoint:dst`
+
+### Price fetching issues
+
+- Ensure `JUPITER_API_KEY` is set in `.env`
+- Check price cache: `redis-cli -a <password> -n 1 KEYS "price:*"`
+- Clear cache to refetch: `redis-cli -a <password> -n 1 FLUSHDB`
+- Jupiter V3 API requires API key from [portal.jup.ag](https://portal.jup.ag)

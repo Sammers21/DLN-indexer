@@ -6,7 +6,8 @@ A production-ready application that indexes DLN (deBridge Liquidity Network) ord
 
 - **Event Indexing**: Indexes `OrderCreated` and `OrderFulfilled` events from DLN contracts on Solana
 - **Bidirectional Indexing**: Prioritizes new transactions while also backfilling historical data
-- **USD Volume Calculation**: Converts token amounts to USD using Jupiter Price API
+- **USD Volume Calculation**: Converts token amounts to USD using Jupiter Price API V3
+- **Price Caching**: Redis-based price cache with 10-minute TTL for efficient API usage
 - **Restart Safety**: Interval-based checkpoint that tracks indexed range (from/to signatures)
 - **Analytics Dashboard**: React-based dashboard with daily volume charts and date filtering
 - **High-Performance Storage**: Uses ClickHouse for fast analytical queries
@@ -24,28 +25,19 @@ A production-ready application that indexes DLN (deBridge Liquidity Network) ord
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
 │                       Storage Layer                              │
-│  ┌──────────────┐                    ┌──────────────┐           │
-│  │  ClickHouse  │ ←─ Orders Data     │    Redis     │           │
-│  │  (Analytics) │                    │ (Checkpoint) │           │
-│  └──────────────┘                    └──────────────┘           │
+│  ┌──────────────┐       ┌──────────────────────────────────┐    │
+│  │  ClickHouse  │       │           Redis                  │    │
+│  │  (Analytics) │       │  db 0: Checkpoints               │    │
+│  └──────────────┘       │  db 1: Price Cache (10min TTL)   │    │
+│         ↑               └──────────────────────────────────┘    │
+│    Orders Data                       ↑                          │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
-│                        API Layer                                 │
+│                    Dashboard (Hono + React)                      │
 │  ┌──────────────────────────────────────────────────────────┐   │
-│  │                    Fastify REST API                       │   │
-│  │  /api/orders  /api/volumes  /api/volumes/daily           │   │
-│  └──────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────────┐
-│                        Dashboard                                 │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │              React + Recharts Dashboard                   │   │
-│  │  • Daily volume line charts                              │   │
-│  │  • Order count bar charts                                │   │
-│  │  • Date range filtering                                  │   │
-│  │  • Paginated orders table                                │   │
+│  │  Hono API: /api/orders  /api/volumes  /api/volumes/daily │   │
+│  │  React UI: Daily charts, Order table, Date filtering     │   │
 │  └──────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -73,21 +65,23 @@ This ensures:
 
 ## Technology Stack
 
-| Component | Technology              | Rationale                               |
-| --------- | ----------------------- | --------------------------------------- |
-| Runtime   | Bun + TypeScript        | Fast startup, native TS support         |
-| Database  | ClickHouse              | Column-oriented OLAP, fast aggregations |
-| Cache     | Redis                   | Checkpoint state storage                |
-| API       | Fastify                 | High performance, TypeScript support    |
-| Dashboard | React + Vite + Recharts | Modern, fast, good charting             |
-| Monorepo  | Turborepo               | Fast builds, smart caching              |
-| Testing   | Mocha + Chai            | Mature, flexible test framework         |
+| Component | Technology           | Rationale                               |
+| --------- | -------------------- | --------------------------------------- |
+| Runtime   | Bun + TypeScript     | Fast startup, native TS support         |
+| Database  | ClickHouse           | Column-oriented OLAP, fast aggregations |
+| Cache     | Redis                | Checkpoints (db 0) + Price cache (db 1) |
+| Pricing   | Jupiter Price API V3 | Real-time Solana token prices           |
+| Web       | Hono + React + Vite  | Lightweight server + modern frontend    |
+| Charts    | Recharts             | React-based charting library            |
+| Monorepo  | Turborepo            | Fast builds, smart caching              |
+| Testing   | Mocha + Chai         | Mature, flexible test framework         |
 
 ## Prerequisites
 
 - [Bun](https://bun.sh/) >= 1.0
 - [Docker](https://www.docker.com/) and Docker Compose
 - Solana RPC endpoint (default: public mainnet)
+- Jupiter API key from [portal.jup.ag](https://portal.jup.ag)
 
 ## Quick Start
 
@@ -130,23 +124,27 @@ The indexer will:
 2. Fetch transactions from DLN programs (forward and backward)
 3. Parse `CreatedOrder` and `Fulfilled` events
 4. Enrich `OrderCreated` with USD prices from Jupiter
-5. Store in ClickHouse
+5. Enrich `OrderFulfilled` via DLN API + Jupiter prices
+6. Cache prices in Redis (10 min TTL)
+7. Store in ClickHouse
 
-### 5. Start the API Server
-
-```bash
-bun run api
-```
-
-API available at http://localhost:3000
-
-### 6. Start the Dashboard
+### 5. Start the Dashboard (API + UI)
 
 ```bash
 bun run dashboard
 ```
 
-Dashboard available at http://localhost:5173
+Dashboard available at http://localhost:5173 (dev mode with Vite)
+
+For production:
+
+```bash
+cd apps/dashboard
+bun run build
+bun run start
+```
+
+Dashboard available at http://localhost:3000 (Hono server)
 
 ## Project Structure
 
@@ -158,17 +156,18 @@ dln-indexer/
 │   │       ├── main.ts      # Main entry point
 │   │       ├── indexer.ts   # Core indexing logic
 │   │       ├── solana.ts    # Rate-limited Solana client
-│   │       ├── price.ts     # Jupiter price fetching
+│   │       ├── price.ts     # Jupiter V3 price fetching + Redis cache
+│   │       ├── dln-api.ts   # DLN API for OrderFulfilled USD values
 │   │       ├── analytics/   # ClickHouse analytics
 │   │       ├── checkpoint/  # Checkpoint interfaces
 │   │       └── storage/     # Redis & ClickHouse implementations
-│   ├── api/                 # Fastify REST API
-│   │   └── src/
-│   │       ├── main.ts      # API server
-│   │       └── routes/      # API routes
-│   └── dashboard/           # React + Vite dashboard
+│   └── dashboard/           # Hono + React dashboard (single app)
 │       └── src/
-│           └── App.tsx      # Dashboard UI
+│           ├── server/      # Hono API server
+│           │   └── index.ts # API routes + static serving
+│           └── client/      # React frontend
+│               ├── App.tsx  # Dashboard UI
+│               └── main.tsx # React entry point
 ├── packages/
 │   └── shared/              # Shared code library
 │       └── src/
@@ -232,10 +231,11 @@ Using Anchor's `BorshCoder` and `EventParser` to deserialize events from transac
 
 ### 3. Price Conversion Strategy
 
-- **Jupiter Price API**: Real-time prices for Solana tokens
-- **OrderCreated**: USD value calculated from `give` token amount
-- **OrderFulfilled**: USD value set to -1 (not calculated)
-- **Stablecoin handling**: USDC/USDT treated as $1.00
+- **Jupiter Price API V3**: Real-time prices for all Solana tokens (requires API key)
+- **Redis Price Cache**: 10-minute TTL in db 1 to minimize API calls
+- **OrderCreated**: USD value calculated from `give` token amount via Jupiter
+- **OrderFulfilled**: USD value fetched via DLN API (cross-chain order details) + Jupiter
+- **Token Support**: Any Solana SPL token that Jupiter supports
 
 ### 4. Restart Safety with Interval Checkpoints
 
@@ -276,11 +276,13 @@ bun run dev
 
 # Run specific app
 bun run indexer    # Run indexer
-bun run api        # Run API server
-bun run dashboard  # Run dashboard dev server
+bun run dashboard  # Run dashboard (Vite dev server + API proxy)
 
 # Build all packages
 bun run build
+
+# Run dashboard in production mode
+bun run dashboard:server
 
 # Run all tests
 bun run test
@@ -288,13 +290,11 @@ bun run test
 
 ## Future Improvements
 
-- [ ] Historical price backfill using CoinGecko API
+- [ ] Historical price backfill for past orders
 - [ ] GraphQL API for flexible queries
 - [ ] Kubernetes deployment manifests
 - [ ] Prometheus metrics and Grafana dashboards
-- [ ] Multi-chain support (EVM orders)
 - [ ] Order lifecycle tracking (created → fulfilled → unlocked)
-- [ ] Calculate USD value for OrderFulfilled from stored OrderCreated data
 
 ## License
 

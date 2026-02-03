@@ -33,19 +33,11 @@ interface Order {
   tx_signature: string;
   block_time: string;
   give_amount_usd?: number;
-  maker?: string;
-  taker?: string;
 }
 
-const API_BASE = "/api";
-
 function formatUsd(value: number): string {
-  if (value >= 1_000_000) {
-    return `$${(value / 1_000_000).toFixed(2)}M`;
-  }
-  if (value >= 1_000) {
-    return `$${(value / 1_000).toFixed(2)}K`;
-  }
+  if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(2)}M`;
+  if (value >= 1_000) return `$${(value / 1_000).toFixed(2)}K`;
   return `$${value.toFixed(2)}`;
 }
 
@@ -61,10 +53,8 @@ function App() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // Date filters
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
-
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -73,29 +63,23 @@ function App() {
       if (startDate) params.set("start_date", startDate);
       if (endDate) params.set("end_date", endDate);
       const queryString = params.toString() ? `?${params.toString()}` : "";
-      // Fetch volumes
-      const volumesRes = await fetch(`${API_BASE}/volumes/daily${queryString}`);
-      if (!volumesRes.ok) throw new Error("Failed to fetch volumes");
-      const volumesData = await volumesRes.json();
+      const [volumesRes, summaryRes, ordersRes] = await Promise.all([
+        fetch(`/api/volumes/daily${queryString}`),
+        fetch(`/api/volumes/summary${queryString}`),
+        fetch(
+          `/api/orders?page=${page}&limit=10${startDate ? `&start_date=${startDate}` : ""}${endDate ? `&end_date=${endDate}` : ""}`
+        ),
+      ]);
+      if (!volumesRes.ok || !summaryRes.ok || !ordersRes.ok) {
+        throw new Error("Failed to fetch data");
+      }
+      const [volumesData, summaryData, ordersData] = await Promise.all([
+        volumesRes.json(),
+        summaryRes.json(),
+        ordersRes.json(),
+      ]);
       setVolumes(volumesData);
-      // Fetch summary
-      const summaryRes = await fetch(
-        `${API_BASE}/volumes/summary${queryString}`,
-      );
-      if (!summaryRes.ok) throw new Error("Failed to fetch summary");
-      const summaryData = await summaryRes.json();
       setSummary(summaryData);
-      // Fetch orders
-      const ordersParams = new URLSearchParams();
-      ordersParams.set("page", page.toString());
-      ordersParams.set("limit", "10");
-      if (startDate) ordersParams.set("start_date", startDate);
-      if (endDate) ordersParams.set("end_date", endDate);
-      const ordersRes = await fetch(
-        `${API_BASE}/orders?${ordersParams.toString()}`,
-      );
-      if (!ordersRes.ok) throw new Error("Failed to fetch orders");
-      const ordersData = await ordersRes.json();
       setOrders(ordersData.orders);
       setOrdersTotal(ordersData.total);
     } catch (err) {
@@ -104,13 +88,10 @@ function App() {
       setLoading(false);
     }
   }, [startDate, endDate, page]);
-
   useEffect(() => {
     fetchData();
   }, [fetchData]);
-
   const totalPages = Math.ceil(ordersTotal / 10);
-
   return (
     <div className="container">
       <header>
@@ -141,7 +122,6 @@ function App() {
         </div>
       </header>
       {error && <div className="error">{error}</div>}
-      {/* Stats Cards */}
       <div className="stats-grid">
         <div className="stat-card created">
           <h3>Created Orders</h3>
@@ -168,7 +148,6 @@ function App() {
           </div>
         </div>
       </div>
-      {/* Volume Chart */}
       <div className="charts-section">
         <h2>Daily Volume (USD)</h2>
         <div className="chart-container">
@@ -209,7 +188,6 @@ function App() {
           )}
         </div>
       </div>
-      {/* Order Count Chart */}
       <div className="charts-section">
         <h2>Daily Order Count</h2>
         <div className="chart-container">
@@ -238,7 +216,6 @@ function App() {
           )}
         </div>
       </div>
-      {/* Orders Table */}
       <div className="orders-section">
         <h2>Recent Orders ({formatNumber(ordersTotal)} total)</h2>
         {loading ? (
