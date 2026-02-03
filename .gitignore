@@ -34,7 +34,7 @@ coverage/
 .c8_output/
 
 # Bun
-bun.lockb
+bun.lock
 
 # ClickHouse data (if running locally outside docker)
 clickhouse-data/

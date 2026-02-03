@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
+    branches: [main]
   pull_request:
-    branches: [main, master]
+    branches: [main]
 
 jobs:
   build-and-test:
@@ -34,10 +34,18 @@ jobs:
       - name: Type check dashboard
         run: bunx tsc --noEmit -p apps/dashboard/tsconfig.json
 
-      - name: Run tests with coverage
-        run: |
-          cd apps/indexer && npx c8 --reporter=lcov --report-dir=../../coverage/indexer mocha
-          cd ../../apps/api && npx c8 --reporter=lcov --report-dir=../../coverage/api mocha
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run indexer tests with coverage
+        working-directory: apps/indexer
+        run: npx c8 --reporter=lcov --report-dir=../../coverage/indexer mocha
+
+      - name: Run API tests with coverage
+        working-directory: apps/api
+        run: npx c8 --reporter=lcov --report-dir=../../coverage/api mocha
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
@@ -47,6 +55,37 @@ jobs:
 
       - name: Build dashboard
         run: bun run build --filter=@dln/dashboard
+
+  docker-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build API image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          push: false
+
+      - name: Build Indexer image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: apps/indexer/Dockerfile
+          push: false
+
+      - name: Build Dashboard image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: apps/dashboard/Dockerfile
+          push: false
 
   lint:
     runs-on: ubuntu-latest

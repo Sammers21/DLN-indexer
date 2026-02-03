@@ -2,7 +2,7 @@ name: Release Images
 
 on:
   push:
-    branches: [main, master]
+    branches: [main]
 
 permissions:
   contents: read
