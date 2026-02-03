@@ -2,7 +2,7 @@ import { PublicKey, ConfirmedSignatureInfo, VersionedTransactionResponse } from 
 import { BorshCoder, EventParser } from "@coral-xyz/anchor";
 import { config, createLogger, DLN_SRC_IDL, DLN_DST_IDL } from "@dln/shared";
 import { Checkpoint, CheckpointStore, ProgramType } from "./checkpoint";
-import { Analytics, Order, OrderKind } from "./analytics";
+import { Order, OrderKind } from "./analytics";
 import { SolanaClient } from "./solana";
 import { getUsdValue } from "./price";
 import { OrderStorage } from "./storage";
@@ -67,7 +67,6 @@ const dstEventParser = new EventParser(DLN_DST, dstCoder);
 export class Indexer {
     private readonly solana: SolanaClient;
     private readonly checkpointStore: CheckpointStore;
-    private readonly analytics: Analytics;
     private readonly orderStorage: OrderStorage;
     private readonly kind: OrderKind;
     private readonly programId: PublicKey;
@@ -76,16 +75,15 @@ export class Indexer {
     private checkpoint: Checkpoint | null = null;
     private lastCheckpointSaveTime = 0;
     private running = false;
+    private skippedFulfilledCount = 0;
     constructor(
         solana: SolanaClient,
         checkpointStore: CheckpointStore,
-        analytics: Analytics,
         orderStorage: OrderStorage,
         kind: OrderKind
     ) {
         this.solana = solana;
         this.checkpointStore = checkpointStore;
-        this.analytics = analytics;
         this.orderStorage = orderStorage;
         this.kind = kind;
         this.programId = kind === "OrderCreated" ? DLN_SRC : DLN_DST;
@@ -123,6 +121,10 @@ export class Indexer {
                 for (const sigInfo of chronological) {
                     if (!this.running) break;
                     await this.handleSignature(sigInfo);
+                }
+                // if fetched batch is small then we sleep before checking signatures again
+                if (signatures.length < config.indexer.batchSize) {
+                    await this.sleep(config.indexer.delayMs);
                 }
             } catch (err) {
                 logger.error({ err, kind: this.kind }, "Error during indexing, retrying...");
@@ -207,11 +209,8 @@ export class Indexer {
             usdValue,
             kind: this.kind,
         };
-        // Insert into ClickHouse
-        await this.analytics.insertOrders([order]);
-        // Save to OrderStorage for later lookup by OrderFulfilled
+        // Save to OrderStorage (CompositeStorage saves to Redis + ClickHouse)
         await this.orderStorage.saveOrder(order);
-        logger.debug({ orderId, usdValue }, "OrderCreated saved to storage");
         return order;
     }
     private async processOrderFulfilled(
@@ -228,7 +227,8 @@ export class Indexer {
             // Lookup the original OrderCreated
             const storedOrder = await this.orderStorage.findOrderById(orderId);
             if (!storedOrder) {
-                logger.debug({ orderId }, "OrderCreated not found in storage, skipping OrderFulfilled");
+                this.skippedFulfilledCount++;
+                logger.info({ orderId, skippedTotal: this.skippedFulfilledCount }, "OrderCreated not found, skipping OrderFulfilled");
                 return null;
             }
             logger.info({ orderId, usdValue: storedOrder.usdValue }, "Found cached OrderCreated");
@@ -239,8 +239,8 @@ export class Indexer {
                 usdValue: storedOrder.usdValue,
                 kind: this.kind,
             };
-            // Insert into ClickHouse
-            await this.analytics.insertOrders([order]);
+            // Save to OrderStorage (CompositeStorage saves to Redis + ClickHouse)
+            await this.orderStorage.saveOrder(order);
             return order;
         }
         return null;
@@ -252,10 +252,7 @@ export class Indexer {
             if (srcCheckpoint && srcCheckpoint.blockTime > txBlockTime) {
                 return;
             }
-            logger.debug({
-                txBlockTime: formatTime(txBlockTime),
-                srcCheckpointTime: srcCheckpoint ? formatTime(srcCheckpoint.blockTime) : "none",
-            }, "Waiting for OrderCreated indexer to catch up");
+            logger.info(`OrderFulfilled waiting for OrderCreated indexer: txBlockTime=${formatTime(txBlockTime)}, srcCheckpoint=${srcCheckpoint ? formatTime(srcCheckpoint.blockTime) : "none"}`);
             await this.sleep(1000);
         }
     }
@@ -270,11 +267,7 @@ export class Indexer {
         if (now - this.lastCheckpointSaveTime >= 1000) {
             await this.checkpointStore.setCheckpoint(this.programType, this.checkpoint);
             this.lastCheckpointSaveTime = now;
-            logger.debug({
-                kind: this.kind,
-                signature: sigInfo.signature,
-                blockTime: formatTime(blockTime),
-            }, "Checkpoint saved");
+            logger.info(`${this.kind} checkpoint saved: signature=${sigInfo.signature.slice(0, 16)}..., blockTime=${formatTime(blockTime)}`);
         }
     }
     private sleep(ms: number): Promise<void> {

@@ -2,11 +2,59 @@ import winston from "winston";
 
 const { combine, timestamp, printf, colorize, errors } = winston.format;
 
-// Custom format that mimics pino-pretty output style
-const customFormat = printf(({ level, message, timestamp, name, ...meta }) => {
-    const nameStr = name ? `[${name}] ` : "";
-    const metaStr = Object.keys(meta).length > 0 ? ` ${JSON.stringify(meta)}` : "";
-    return `${timestamp} ${level}: ${nameStr}${message}${metaStr}`;
+// Color codes for different elements
+const colors = {
+    reset: "\x1b[0m",
+    dim: "\x1b[2m",
+    cyan: "\x1b[36m",
+    yellow: "\x1b[33m",
+    green: "\x1b[32m",
+    magenta: "\x1b[35m",
+    white: "\x1b[37m",
+    gray: "\x1b[90m",
+};
+
+// Format metadata value with appropriate styling
+function formatValue(key: string, value: unknown): string {
+    if (value === null || value === undefined) {
+        return `${colors.dim}null${colors.reset}`;
+    }
+    if (typeof value === "number") {
+        return `${colors.yellow}${value}${colors.reset}`;
+    }
+    if (typeof value === "boolean") {
+        return value ? `${colors.green}true${colors.reset}` : `${colors.yellow}false${colors.reset}`;
+    }
+    if (typeof value === "string") {
+        // Truncate long strings (like signatures)
+        if (value.length > 24 && (key === "signature" || key === "orderId" || key === "lastSignature" || key === "checkpointSignature")) {
+            return `${colors.cyan}"${value.slice(0, 12)}...${value.slice(-8)}"${colors.reset}`;
+        }
+        return `${colors.cyan}"${value}"${colors.reset}`;
+    }
+    if (typeof value === "object") {
+        return `${colors.dim}${JSON.stringify(value)}${colors.reset}`;
+    }
+    return String(value);
+}
+
+// Format metadata object into a pretty string
+function formatMeta(meta: Record<string, unknown>): string {
+    const entries = Object.entries(meta);
+    if (entries.length === 0) return "";
+    const formatted = entries
+        .map(([key, value]) => `${colors.gray}${key}${colors.reset}=${formatValue(key, value)}`)
+        .join(" ");
+    return ` ${formatted}`;
+}
+
+// Custom pretty format
+const prettyFormat = printf(({ level, message, timestamp, name, ...meta }) => {
+    const timeStr = `${colors.dim}${timestamp}${colors.reset}`;
+    const nameStr = name ? `${colors.magenta}[${name}]${colors.reset} ` : "";
+    const msgStr = `${colors.white}${message}${colors.reset}`;
+    const metaStr = formatMeta(meta as Record<string, unknown>);
+    return `${timeStr} ${level} ${nameStr}${msgStr}${metaStr}`;
 });
 
 // Base logger configuration
@@ -14,13 +62,13 @@ export const logger = winston.createLogger({
     level: process.env.LOG_LEVEL || "info",
     format: combine(
         errors({ stack: true }),
-        timestamp({ format: "YYYY-MM-DD HH:mm:ss" })
+        timestamp({ format: "HH:mm:ss" })
     ),
     transports: [
         new winston.transports.Console({
             format: combine(
-                colorize({ all: true }),
-                customFormat
+                colorize({ level: true }),
+                prettyFormat
             ),
         }),
     ],

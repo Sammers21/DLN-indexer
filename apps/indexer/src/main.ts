@@ -15,8 +15,8 @@ async function main(): Promise<void> {
   // Composite storage: tries Redis first (fast), then ClickHouse (permanent)
   const orderStorage = new CompositeOrderStorage([redis, clickhouse]);
   // Create two indexer instances, one for each order kind
-  const srcIndexer = new Indexer(solana, redis, clickhouse, orderStorage, "OrderCreated");
-  const dstIndexer = new Indexer(solana, redis, clickhouse, orderStorage, "OrderFulfilled");
+  const srcIndexer = new Indexer(solana, redis, orderStorage, "OrderCreated");
+  const dstIndexer = new Indexer(solana, redis, orderStorage, "OrderFulfilled");
   async function shutdown(code: number): Promise<void> {
     srcIndexer.stop();
     dstIndexer.stop();

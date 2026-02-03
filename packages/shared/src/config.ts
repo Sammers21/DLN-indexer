@@ -38,7 +38,7 @@ export const config = {
     host: process.env.API_HOST || "0.0.0.0",
   },
   indexer: {
-    batchSize: parseInt(process.env.INDEXER_BATCH_SIZE || "5", 10),
+    batchSize: parseInt(process.env.INDEXER_BATCH_SIZE || "50", 10),
     delayMs: parseInt(process.env.INDEXER_DELAY_MS || "10000", 10),
   },
   dln: {
