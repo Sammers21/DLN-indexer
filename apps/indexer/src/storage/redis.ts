@@ -6,6 +6,7 @@ const logger = createLogger("redis");
 
 const CHECKPOINT_PREFIX = "indexer:checkpoint:";
 const PRICE_PREFIX = "price:";
+const DECIMALS_PREFIX = "decimals:";
 const PRICE_TTL_SECONDS = 600; // 10 minutes
 
 function formatBlockTime(timestamp: number): string {
@@ -75,5 +76,17 @@ export class Redis implements CheckpointStore {
     async setCachedPrice(tokenKey: string, price: number): Promise<void> {
         await this.priceClient.setex(`${PRICE_PREFIX}${tokenKey}`, PRICE_TTL_SECONDS, price.toString());
         logger.debug({ tokenKey, price, ttl: PRICE_TTL_SECONDS }, "Price cached");
+    }
+    async getCachedDecimals(tokenKey: string): Promise<number | null> {
+        const data = await this.priceClient.get(`${DECIMALS_PREFIX}${tokenKey}`);
+        if (!data) return null;
+        const decimals = Number.parseInt(data, 10);
+        if (!Number.isInteger(decimals)) return null;
+        logger.debug({ tokenKey, decimals }, "Decimals cache hit");
+        return decimals;
+    }
+    async setCachedDecimals(tokenKey: string, decimals: number): Promise<void> {
+        await this.priceClient.set(`${DECIMALS_PREFIX}${tokenKey}`, decimals.toString());
+        logger.debug({ tokenKey, decimals }, "Decimals cached");
     }
 }

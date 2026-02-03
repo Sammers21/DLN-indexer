@@ -74,7 +74,11 @@ export async function getUsdValueFromDlnApi(orderId: string): Promise<PricingRes
                     logger.warn({ orderId: orderId.slice(0, 16), mint }, "No Jupiter price available");
                     return errorResult("no_price");
                 }
-                const decimals = getTokenDecimals(mint);
+                const decimals = await getTokenDecimals(mint);
+                if (decimals === null) {
+                    logger.warn({ orderId: orderId.slice(0, 16), mint }, "No token decimals available");
+                    return errorResult("no_decimals");
+                }
                 const usdValue = calculateUsdValue(amount, decimals, price);
                 logger.debug({ orderId: orderId.slice(0, 16), mint, price, usdValue }, "USD value calculated");
                 return okResult(usdValue);

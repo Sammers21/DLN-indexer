@@ -1,4 +1,4 @@
-import { PublicKey } from "@solana/web3.js";
+import { Connection, PublicKey } from "@solana/web3.js";
 import { config, createLogger } from "@dln/shared";
 import { Redis } from "./storage/redis";
 
@@ -6,16 +6,28 @@ const logger = createLogger("price");
 
 // Jupiter Price API V3 (requires API key from https://portal.jup.ag)
 const JUPITER_API = "https://api.jup.ag/price/v3";
+const TOKEN_MINT_DECIMALS_OFFSET = 44;
+const TOKEN_MINT_MIN_LENGTH = 45;
+const KNOWN_DECIMALS: Record<string, number> = {
+    So11111111111111111111111111111111111111112: 9,  // SOL
+    EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v: 6,  // USDC
+    Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB: 6,  // USDT
+    DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263: 5,  // BONK
+    JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN: 6,   // JUP
+};
 
-// Redis client for price caching
+// Redis client for price + decimals caching
 let redisClient: Redis | null = null;
+let solanaConnection: Connection | null = null;
+const localDecimalsCache = new Map<string, number>();
+const decimalsInFlight = new Map<string, Promise<number | null>>();
 
 /**
- * Set Redis client for price caching (10 min TTL)
+ * Set Redis client for price + decimals caching
  */
 export function setPriceCache(redis: Redis): void {
     redisClient = redis;
-    logger.info("Redis price cache enabled");
+    logger.info("Redis price + decimals cache enabled");
 }
 
 // Retry config
@@ -24,6 +36,13 @@ const RETRY_DELAY_MS = 500;
 
 function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getSolanaConnection(): Connection {
+    if (!solanaConnection) {
+        solanaConnection = new Connection(config.solana.rpcUrl, { commitment: "confirmed" });
+    }
+    return solanaConnection;
 }
 
 /**
@@ -103,17 +122,81 @@ export function tokenBytesToMint(tokenBytes: number[]): string | null {
 }
 
 /**
- * Get token decimals (defaults to 6 if unknown)
+ * Decode 32-byte amount bytes into bigint
  */
-export function getTokenDecimals(mint: string): number {
-    const KNOWN_DECIMALS: Record<string, number> = {
-        So11111111111111111111111111111111111111112: 9,  // SOL
-        EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v: 6,  // USDC
-        Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB: 6,  // USDT
-        DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263: 5,  // BONK
-        JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN: 6,   // JUP
-    };
-    return KNOWN_DECIMALS[mint] ?? 6;
+export function decodeAmountBytes(amountBytes: number[], endianness: "big" | "little"): bigint {
+    let amount = BigInt(0);
+    if (endianness === "big") {
+        for (const byte of amountBytes) {
+            amount = (amount << BigInt(8)) + BigInt(byte);
+        }
+        return amount;
+    }
+    for (let i = 0; i < amountBytes.length; i++) {
+        amount = amount + (BigInt(amountBytes[i]) << (BigInt(8) * BigInt(i)));
+    }
+    return amount;
+}
+
+async function fetchTokenDecimalsFromMint(mint: string): Promise<number | null> {
+    try {
+        const connection = getSolanaConnection();
+        const accountInfo = await connection.getAccountInfo(new PublicKey(mint), { commitment: "confirmed" });
+        if (!accountInfo?.data || accountInfo.data.length < TOKEN_MINT_MIN_LENGTH) {
+            logger.warn({ mint }, "Mint account not found or invalid");
+            return null;
+        }
+        const decimalsByte = accountInfo.data[TOKEN_MINT_DECIMALS_OFFSET];
+        if (decimalsByte === undefined) return null;
+        const decimals = Number(decimalsByte);
+        if (!Number.isInteger(decimals)) return null;
+        logger.debug({ mint, decimals }, "Fetched token decimals from mint account");
+        return decimals;
+    } catch (err) {
+        logger.warn({ err, mint }, "Failed to fetch token decimals from mint");
+        return null;
+    }
+}
+
+/**
+ * Get token decimals from cache or mint account
+ */
+export async function getTokenDecimals(mint: string): Promise<number | null> {
+    const localCached = localDecimalsCache.get(mint);
+    if (localCached !== undefined) return localCached;
+    if (redisClient) {
+        const cached = await redisClient.getCachedDecimals(`solana:${mint}`);
+        if (cached !== null) {
+            localDecimalsCache.set(mint, cached);
+            return cached;
+        }
+    }
+    const knownDecimals = KNOWN_DECIMALS[mint];
+    if (knownDecimals !== undefined) {
+        localDecimalsCache.set(mint, knownDecimals);
+        if (redisClient) {
+            await redisClient.setCachedDecimals(`solana:${mint}`, knownDecimals);
+        }
+        return knownDecimals;
+    }
+    const inFlight = decimalsInFlight.get(mint);
+    if (inFlight) return inFlight;
+    const fetchPromise = (async (): Promise<number | null> => {
+        const decimals = await fetchTokenDecimalsFromMint(mint);
+        if (decimals !== null) {
+            localDecimalsCache.set(mint, decimals);
+            if (redisClient) {
+                await redisClient.setCachedDecimals(`solana:${mint}`, decimals);
+            }
+        }
+        return decimals;
+    })();
+    decimalsInFlight.set(mint, fetchPromise);
+    try {
+        return await fetchPromise;
+    } finally {
+        decimalsInFlight.delete(mint);
+    }
 }
 
 /**
@@ -121,7 +204,7 @@ export function getTokenDecimals(mint: string): number {
  */
 export function calculateUsdValue(amount: bigint, decimals: number, priceUsd: number): number {
     if (amount === BigInt(0)) return 0;
-    const divisor = BigInt(10 ** decimals);
+    const divisor = BigInt(10) ** BigInt(decimals);
     const wholeUnits = Number(amount / divisor);
     const fractionalUnits = Number(amount % divisor) / Number(divisor);
     return (wholeUnits + fractionalUnits) * priceUsd;
@@ -133,17 +216,17 @@ export function calculateUsdValue(amount: bigint, decimals: number, priceUsd: nu
 export async function getUsdValue(tokenBytes: number[], amountBytes: number[]): Promise<number> {
     const mint = tokenBytesToMint(tokenBytes);
     if (!mint) return 0;
-    // Convert amount bytes to bigint (big-endian)
-    let amount = BigInt(0);
-    for (const byte of amountBytes) {
-        amount = (amount << BigInt(8)) + BigInt(byte);
-    }
+    const amount = decodeAmountBytes(amountBytes, "big");
     if (amount === BigInt(0)) return 0;
     const price = await getTokenPrice(mint);
     if (price === null) {
         logger.debug({ mint }, "No price available for token");
         return 0;
     }
-    const decimals = getTokenDecimals(mint);
+    const decimals = await getTokenDecimals(mint);
+    if (decimals === null) {
+        logger.warn({ mint }, "No decimals available for token");
+        return 0;
+    }
     return calculateUsdValue(amount, decimals, price);
 }
