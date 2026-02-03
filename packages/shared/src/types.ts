@@ -14,8 +14,10 @@ export interface Analytics {
     close(): Promise<void>;
 }
 
-export interface DailyVolume {
-    date: string;
+export type VolumeInterval = "day" | "hour" | "15min";
+
+export interface VolumeData {
+    period: string;
     event_type: string;
     order_count: number;
     volume_usd: number;

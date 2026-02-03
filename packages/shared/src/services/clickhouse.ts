@@ -1,7 +1,7 @@
 import { createClient, ClickHouseClient } from "@clickhouse/client";
 import { config } from "../config.js";
 import { createLogger } from "../utils/logger.js";
-import type { Analytics, Order, OrderKind, DailyVolume } from "../types.js";
+import type { Analytics, Order, OrderKind, VolumeData, VolumeInterval } from "../types.js";
 
 const logger = createLogger("clickhouse");
 
@@ -116,40 +116,91 @@ export async function getOrders(params: {
     return { orders, total };
 }
 
-export async function getDailyVolumes(params: {
+export async function getDateRange(): Promise<{ min: string; max: string }> {
+    const ch = getQueryClient();
+    const result = await ch.query({
+        query: `SELECT min(block_time) as min_time, max(block_time) as max_time FROM orders FINAL`,
+        format: "JSONEachRow",
+    });
+    const rows = (await result.json()) as unknown as Array<{ min_time: string; max_time: string }>;
+    const row = rows[0];
+    return {
+        min: row?.min_time ?? "",
+        max: row?.max_time ?? "",
+    };
+}
+
+export async function getVolumes(params: {
     startDate?: string;
     endDate?: string;
-}): Promise<DailyVolume[]> {
+    interval?: VolumeInterval;
+}): Promise<VolumeData[]> {
     const ch = getQueryClient();
+    const interval = params.interval || "day";
     const conditions: string[] = [];
     const queryParams: Record<string, string> = {};
+
+    if (interval === "day") {
+        // Use pre-aggregated materialized view for day interval
+        if (params.startDate) {
+            conditions.push("date >= {startDate:Date}");
+            queryParams.startDate = params.startDate.slice(0, 10);
+        }
+        if (params.endDate) {
+            conditions.push("date <= {endDate:Date}");
+            queryParams.endDate = params.endDate.slice(0, 10);
+        }
+        const whereClause =
+            conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+        const result = await ch.query({
+            query: `
+                SELECT
+                    toString(date) as period,
+                    event_type,
+                    sum(order_count) as order_count,
+                    sum(volume_usd) as volume_usd
+                FROM daily_volumes_mv FINAL
+                ${whereClause}
+                GROUP BY date, event_type
+                ORDER BY date ASC
+            `,
+            query_params: queryParams,
+            format: "JSONEachRow",
+        });
+        return (await result.json()) as unknown as VolumeData[];
+    }
+
+    // For hour/15min, query raw orders table
+    const periodExpr = interval === "hour"
+        ? "toStartOfHour(block_time)"
+        : "toStartOfFifteenMinutes(block_time)";
+
     if (params.startDate) {
-        conditions.push("date >= {startDate:Date}");
+        conditions.push("block_time >= {startDate:DateTime64(3)}");
         queryParams.startDate = params.startDate;
     }
     if (params.endDate) {
-        conditions.push("date <= {endDate:Date}");
+        conditions.push("block_time <= {endDate:DateTime64(3)}");
         queryParams.endDate = params.endDate;
     }
     const whereClause =
         conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
     const result = await ch.query({
         query: `
-      SELECT
-        date,
-        event_type,
-        sum(order_count) as order_count,
-        sum(volume_usd) as volume_usd
-      FROM daily_volumes_mv FINAL
-      ${whereClause}
-      GROUP BY date, event_type
-      ORDER BY date ASC
-    `,
+            SELECT
+                toString(${periodExpr}) as period,
+                event_type,
+                count() as order_count,
+                sum(usd_value) as volume_usd
+            FROM orders FINAL
+            ${whereClause}
+            GROUP BY period, event_type
+            ORDER BY period ASC
+        `,
         query_params: queryParams,
         format: "JSONEachRow",
     });
-    const data = await result.json<DailyVolume>();
-    return data as unknown as DailyVolume[];
+    return (await result.json()) as unknown as VolumeData[];
 }
 
 export async function getVolumeSummary(params: {
@@ -165,25 +216,25 @@ export async function getVolumeSummary(params: {
     const conditions: string[] = [];
     const queryParams: Record<string, string> = {};
     if (params.startDate) {
-        conditions.push("date >= {startDate:Date}");
+        conditions.push("block_time >= {startDate:DateTime64(3)}");
         queryParams.startDate = params.startDate;
     }
     if (params.endDate) {
-        conditions.push("date <= {endDate:Date}");
+        conditions.push("block_time <= {endDate:DateTime64(3)}");
         queryParams.endDate = params.endDate;
     }
     const whereClause =
         conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
     const result = await ch.query({
         query: `
-      SELECT
-        sumIf(volume_usd, event_type = 'created') as total_created_volume_usd,
-        sumIf(volume_usd, event_type = 'fulfilled') as total_fulfilled_volume_usd,
-        sumIf(order_count, event_type = 'created') as total_created_count,
-        sumIf(order_count, event_type = 'fulfilled') as total_fulfilled_count
-      FROM daily_volumes_mv FINAL
-      ${whereClause}
-    `,
+            SELECT
+                sumIf(usd_value, event_type = 'created') as total_created_volume_usd,
+                sumIf(usd_value, event_type = 'fulfilled') as total_fulfilled_volume_usd,
+                countIf(event_type = 'created') as total_created_count,
+                countIf(event_type = 'fulfilled') as total_fulfilled_count
+            FROM orders FINAL
+            ${whereClause}
+        `,
         query_params: queryParams,
         format: "JSONEachRow",
     });

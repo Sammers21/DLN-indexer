@@ -28,23 +28,30 @@ header h1 {
   font-size: 1.8rem;
   color: #1a1a2e;
 }
-.date-filters {
+.filters {
+  display: flex;
+  gap: 1.5rem;
+  align-items: center;
+}
+.filter-group {
   display: flex;
   gap: 1rem;
   align-items: center;
 }
-.date-filters label {
+.filters label {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   font-size: 0.9rem;
   color: #666;
 }
-.date-filters input {
+.filters input,
+.filters select {
   padding: 0.5rem;
   border: 1px solid #ddd;
   border-radius: 4px;
   font-size: 0.9rem;
+  background: white;
 }
 .stats-grid {
   display: grid;
