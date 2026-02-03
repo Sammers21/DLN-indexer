@@ -39,7 +39,7 @@ export const config = {
   },
   indexer: {
     batchSize: parseInt(process.env.INDEXER_BATCH_SIZE || "5", 10),
-    delayMs: parseInt(process.env.INDEXER_DELAY_MS || "500", 10),
+    delayMs: parseInt(process.env.INDEXER_DELAY_MS || "10000", 10),
   },
   dln: {
     srcProgramId: "src5qyZHqTqecJV4aY6Cb6zDZLMDzrDKKezs22MPHr4",

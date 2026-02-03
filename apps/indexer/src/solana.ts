@@ -36,12 +36,15 @@ export class SolanaClient {
         });
         logger.info({ rpcUrl: this.rpcUrl, rps: requestsPerSecond }, "Solana client initialized with bottleneck rate limiter");
     }
-    private async withRetry<T>(name: string, fn: () => Promise<T>): Promise<T> {
+    private async withRetry<T>(name: string, fn: () => Promise<T>): Promise<{ result: T; timeMs: number }> {
         return this.limiter.schedule(async () => {
             let lastError: Error | null = null;
             for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
                 try {
-                    return await fn();
+                    const start = Date.now();
+                    const result = await fn();
+                    const timeMs = Date.now() - start;
+                    return { result, timeMs };
                 } catch (err) {
                     lastError = err as Error;
                     const is429 = lastError.message?.includes("429") || lastError.message?.includes("Too Many Requests");
@@ -65,20 +68,24 @@ export class SolanaClient {
     }
     async getSignaturesForAddress(
         address: PublicKey,
-        options?: { limit?: number; until?: string }
+        options?: { limit?: number; until?: string; before?: string }
     ): Promise<ConfirmedSignatureInfo[]> {
-        return this.withRetry("getSignaturesForAddress", () =>
+        const { result, timeMs } = await this.withRetry("getSignaturesForAddress", () =>
             this.connection.getSignaturesForAddress(address, options)
         );
+        logger.info({ count: result.length, timeMs }, "getSignaturesForAddress");
+        return result;
     }
     async getTransaction(
         signature: string
     ): Promise<VersionedTransactionResponse | null> {
-        return this.withRetry("getTransaction", () =>
+        const { result, timeMs } = await this.withRetry("getTransaction", () =>
             this.connection.getTransaction(signature, {
                 commitment: "confirmed",
                 maxSupportedTransactionVersion: 0,
             })
         );
+        logger.info({ signature: signature.slice(0, 16) + "...", timeMs, found: result !== null }, "getTransaction");
+        return result;
     }
 }

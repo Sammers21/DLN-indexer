@@ -22,15 +22,6 @@ function formatTime(timestamp: number): string {
     });
 }
 
-// Convert big-endian byte array to bigint
-function bytesToBigInt(bytes: number[]): bigint {
-    let result = BigInt(0);
-    for (const byte of bytes) {
-        result = (result << BigInt(8)) + BigInt(byte);
-    }
-    return result;
-}
-
 // Offer struct from DLN
 interface Offer {
     chainId: number[];
@@ -83,6 +74,7 @@ export class Indexer {
     private readonly programType: ProgramType;
     private readonly eventParser: EventParser;
     private checkpoint: Checkpoint | null = null;
+    private lastCheckpointSaveTime = 0;
     private running = false;
     constructor(
         solana: SolanaClient,
@@ -106,6 +98,7 @@ export class Indexer {
     async startIndexing(): Promise<void> {
         this.checkpoint = await this.checkpointStore.getCheckpoint(this.programType);
         this.running = true;
+        this.lastCheckpointSaveTime = Date.now();
         logger.info({
             kind: this.kind,
             lastSignature: this.checkpoint?.lastSignature ?? "none",
@@ -113,71 +106,23 @@ export class Indexer {
         }, "Starting indexing");
         while (this.running) {
             try {
-                // Fetch signatures after the checkpoint (newest first)
-                const signatures = await this.fetchSignatures(
-                    this.programId,
-                    this.checkpoint?.lastSignature ?? null,
-                    config.indexer.batchSize
-                );
+                // Step 1: Fetch new signatures (after checkpoint)
+                // `until` stops when reaching the checkpoint signature
+                const signatures = await this.solana.getSignaturesForAddress(this.programId, {
+                    limit: config.indexer.batchSize,
+                    until: this.checkpoint?.lastSignature,
+                });
                 if (signatures.length === 0) {
-                    logger.debug({ kind: this.kind }, "No new signatures, waiting...");
+                    logger.info(`${this.kind} indexer: No new signatures, waiting ${config.indexer.delayMs}ms`);
                     await this.sleep(config.indexer.delayMs);
                     continue;
                 }
-                // Process in chronological order (oldest first)
+                // Signatures come newest-first, reverse to process oldest-first (chronological)
                 const chronological = signatures.reverse();
-                const validSigs = chronological.filter((s) => !s.err);
-                if (validSigs.length === 0) {
-                    await this.sleep(config.indexer.delayMs);
-                    continue;
-                }
-                // Fetch and parse transactions (rate-limited by SolanaClient)
-                const allOrders: Order[] = [];
-                let latestSigInfo: ConfirmedSignatureInfo | null = null;
-                for (const sigInfo of validSigs) {
-                    const tx = await this.solana.getTransaction(sigInfo.signature);
-                    if (!tx) continue;
-                    const orders = await this.parseTransactionLogs(tx, sigInfo);
-                    allOrders.push(...orders);
-                    latestSigInfo = sigInfo;
-                }
-                // Batch insert all orders
-                if (allOrders.length > 0) {
-                    await this.analytics.insertOrders(allOrders);
-                    // Save OrderCreated to storage for later lookup by OrderFulfilled
-                    if (this.kind === "OrderCreated") {
-                        for (const order of allOrders) {
-                            await this.orderStorage.saveOrder(order);
-                        }
-                    }
-                    for (const order of allOrders) {
-                        logger.info({
-                            signature: order.signature,
-                            orderId: order.orderId,
-                            kind: this.kind,
-                            usdValue: order.usdValue,
-                            time: formatTime(order.time),
-                        }, "Order indexed");
-                    }
-                }
-                // Update checkpoint to the last processed signature
-                if (latestSigInfo) {
-                    const checkpointTime = latestSigInfo.blockTime ?? Math.floor(Date.now() / 1000);
-                    this.checkpoint = {
-                        lastSignature: latestSigInfo.signature,
-                        blockTime: checkpointTime,
-                    };
-                    await this.checkpointStore.setCheckpoint(this.programType, this.checkpoint);
-                    logger.info({
-                        kind: this.kind,
-                        processed: allOrders.length,
-                        checkpointSignature: this.checkpoint.lastSignature,
-                        checkpointTime: formatTime(checkpointTime),
-                    }, "Batch processed, checkpoint saved");
-                    await this.sleep(config.indexer.delayMs);
-                } else {
-                    logger.info({ kind: this.kind, processed: 0 }, "Batch processed, no new orders, sleeping 10s...");
-                    await this.sleep(10000);
+                // Step 2: Process each transaction one by one
+                for (const sigInfo of chronological) {
+                    if (!this.running) break;
+                    await this.handleSignature(sigInfo);
                 }
             } catch (err) {
                 logger.error({ err, kind: this.kind }, "Error during indexing, retrying...");
@@ -189,88 +134,148 @@ export class Indexer {
         this.running = false;
         logger.info({ kind: this.kind }, "Indexer stopping");
     }
-    private async fetchSignatures(
-        programId: PublicKey,
-        untilSignature: string | null,
-        limit: number
-    ): Promise<ConfirmedSignatureInfo[]> {
-        const options: { limit?: number; until?: string } = { limit };
-        if (untilSignature) {
-            options.until = untilSignature;
+    private async handleSignature(sigInfo: ConfirmedSignatureInfo): Promise<void> {
+        if (sigInfo.err) {
+            // Skip failed transactions but still update checkpoint
+            await this.updateCheckpoint(sigInfo);
+            return;
         }
-        return this.solana.getSignaturesForAddress(programId, options);
+        // Fetch transaction
+        const tx = await this.solana.getTransaction(sigInfo.signature);
+        if (!tx) {
+            logger.warn({ signature: sigInfo.signature }, "Transaction not found");
+            await this.updateCheckpoint(sigInfo);
+            return;
+        }
+        // Parse and process
+        const order = await this.processTransaction(tx, sigInfo);
+        if (order) {
+            logger.info({
+                signature: sigInfo.signature,
+                usdValue: order.usdValue,
+                orderId: order.orderId,
+                kind: this.kind,
+                time: formatTime(order.time),
+            }, "Order indexed");
+        }
+        // Update checkpoint
+        await this.updateCheckpoint(sigInfo);
     }
-    private async parseTransactionLogs(
+    private async processTransaction(
         tx: VersionedTransactionResponse,
         sigInfo: ConfirmedSignatureInfo
-    ): Promise<Order[]> {
-        const orders: Order[] = [];
-        if (!tx.meta?.logMessages) return orders;
+    ): Promise<Order | null> {
+        if (!tx.meta?.logMessages) return null;
+        const txBlockTime = sigInfo.blockTime ?? Math.floor(Date.now() / 1000);
         try {
             const events = this.eventParser.parseLogs(tx.meta.logMessages);
             const eventsList = Array.from(events);
-            if (eventsList.length > 0) {
-                logger.debug({
-                    signature: sigInfo.signature,
-                    kind: this.kind,
-                    eventsFound: eventsList.map((e) => e.name),
-                }, "Events found in transaction");
-            }
             if (this.kind === "OrderCreated") {
-                // For OrderCreated, we need both CreatedOrder (has amounts) and CreatedOrderId (has orderId)
-                let createdOrderData: CreatedOrderData | null = null;
-                let orderId: string | null = null;
-                for (const event of eventsList) {
-                    if (event.name === "CreatedOrder") {
-                        createdOrderData = event.data as unknown as CreatedOrderData;
-                    } else if (event.name === "CreatedOrderId") {
-                        const data = event.data as unknown as { orderId: number[] };
-                        orderId = Buffer.from(data.orderId).toString("hex");
-                    }
-                }
-                if (createdOrderData && orderId) {
-                    // Extract give token and amount (what maker is giving)
-                    const giveTokenBytes = createdOrderData.order.give.tokenAddress;
-                    const giveAmountBytes = createdOrderData.order.give.amount;
-                    // Calculate USD value using Jupiter price
-                    const usdValue = await getUsdValue(giveTokenBytes, giveAmountBytes);
-                    orders.push({
-                        orderId,
-                        signature: sigInfo.signature,
-                        time: sigInfo.blockTime ?? Math.floor(Date.now() / 1000),
-                        usdValue,
-                        kind: this.kind,
-                    });
-                }
+                return await this.processOrderCreated(eventsList, sigInfo, txBlockTime);
             } else {
-                // For OrderFulfilled, look up the original order's USD value from storage
-                for (const event of eventsList) {
-                    if (event.name === "Fulfilled") {
-                        const data = event.data as unknown as FulfilledData;
-                        const orderId = Buffer.from(data.orderId).toString("hex");
-                        // Look up the original OrderCreated to get its USD value
-                        let usdValue = 0;
-                        const storedOrder = await this.orderStorage.findOrderById(orderId);
-                        if (storedOrder) {
-                            usdValue = storedOrder.usdValue;
-                            logger.debug({ orderId, usdValue }, "Found original order USD value");
-                        } else {
-                            logger.debug({ orderId }, "Original order not found in storage");
-                        }
-                        orders.push({
-                            orderId,
-                            signature: sigInfo.signature,
-                            time: sigInfo.blockTime ?? Math.floor(Date.now() / 1000),
-                            usdValue,
-                            kind: this.kind,
-                        });
-                    }
-                }
+                return await this.processOrderFulfilled(eventsList, sigInfo, txBlockTime);
             }
         } catch (err) {
             logger.debug({ err, signature: sigInfo.signature }, "Failed to parse transaction logs");
+            return null;
         }
-        return orders;
+    }
+    private async processOrderCreated(
+        eventsList: Array<{ name: string; data: unknown }>,
+        sigInfo: ConfirmedSignatureInfo,
+        txBlockTime: number
+    ): Promise<Order | null> {
+        let createdOrderData: CreatedOrderData | null = null;
+        let orderId: string | null = null;
+        for (const event of eventsList) {
+            if (event.name === "CreatedOrder") {
+                createdOrderData = event.data as unknown as CreatedOrderData;
+            } else if (event.name === "CreatedOrderId") {
+                const data = event.data as unknown as { orderId: number[] };
+                orderId = Buffer.from(data.orderId).toString("hex");
+            }
+        }
+        if (!createdOrderData || !orderId) return null;
+        // Calculate USD value
+        const giveTokenBytes = createdOrderData.order.give.tokenAddress;
+        const giveAmountBytes = createdOrderData.order.give.amount;
+        const usdValue = await getUsdValue(giveTokenBytes, giveAmountBytes);
+        const order: Order = {
+            orderId,
+            signature: sigInfo.signature,
+            time: txBlockTime,
+            usdValue,
+            kind: this.kind,
+        };
+        // Insert into ClickHouse
+        await this.analytics.insertOrders([order]);
+        // Save to OrderStorage for later lookup by OrderFulfilled
+        await this.orderStorage.saveOrder(order);
+        logger.debug({ orderId, usdValue }, "OrderCreated saved to storage");
+        return order;
+    }
+    private async processOrderFulfilled(
+        eventsList: Array<{ name: string; data: unknown }>,
+        sigInfo: ConfirmedSignatureInfo,
+        txBlockTime: number
+    ): Promise<Order | null> {
+        for (const event of eventsList) {
+            if (event.name !== "Fulfilled") continue;
+            const data = event.data as unknown as FulfilledData;
+            const orderId = Buffer.from(data.orderId).toString("hex");
+            // Wait until OrderCreated indexer has processed past this transaction's time
+            await this.waitForOrderCreatedIndexer(txBlockTime);
+            // Lookup the original OrderCreated
+            const storedOrder = await this.orderStorage.findOrderById(orderId);
+            if (!storedOrder) {
+                logger.debug({ orderId }, "OrderCreated not found in storage, skipping OrderFulfilled");
+                return null;
+            }
+            logger.info({ orderId, usdValue: storedOrder.usdValue }, "Found cached OrderCreated");
+            const order: Order = {
+                orderId,
+                signature: sigInfo.signature,
+                time: txBlockTime,
+                usdValue: storedOrder.usdValue,
+                kind: this.kind,
+            };
+            // Insert into ClickHouse
+            await this.analytics.insertOrders([order]);
+            return order;
+        }
+        return null;
+    }
+    private async waitForOrderCreatedIndexer(txBlockTime: number): Promise<void> {
+        // Poll until OrderCreated checkpoint is ahead of this transaction
+        while (this.running) {
+            const srcCheckpoint = await this.checkpointStore.getCheckpoint("src");
+            if (srcCheckpoint && srcCheckpoint.blockTime > txBlockTime) {
+                return;
+            }
+            logger.debug({
+                txBlockTime: formatTime(txBlockTime),
+                srcCheckpointTime: srcCheckpoint ? formatTime(srcCheckpoint.blockTime) : "none",
+            }, "Waiting for OrderCreated indexer to catch up");
+            await this.sleep(1000);
+        }
+    }
+    private async updateCheckpoint(sigInfo: ConfirmedSignatureInfo): Promise<void> {
+        const now = Date.now();
+        const blockTime = sigInfo.blockTime ?? Math.floor(now / 1000);
+        this.checkpoint = {
+            lastSignature: sigInfo.signature,
+            blockTime,
+        };
+        // Only save to Redis if more than 1 second since last save
+        if (now - this.lastCheckpointSaveTime >= 1000) {
+            await this.checkpointStore.setCheckpoint(this.programType, this.checkpoint);
+            this.lastCheckpointSaveTime = now;
+            logger.debug({
+                kind: this.kind,
+                signature: sigInfo.signature,
+                blockTime: formatTime(blockTime),
+            }, "Checkpoint saved");
+        }
     }
     private sleep(ms: number): Promise<void> {
         return new Promise((resolve) => setTimeout(resolve, ms));
