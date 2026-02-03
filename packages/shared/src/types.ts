@@ -1,11 +1,14 @@
 export type OrderKind = "OrderCreated" | "OrderFulfilled";
 export type OrderEventType = "created" | "fulfilled";
+export type PricingStatus = "ok" | "error";
 
 export interface Order {
     orderId: string;
     signature: string;
     time: number;
-    usdValue: number;
+    usdValue: number | null;
+    pricingStatus: PricingStatus;
+    pricingError: string | null;
     kind: OrderKind;
 }
 

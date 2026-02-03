@@ -26,6 +26,8 @@ export class Clickhouse implements Analytics {
             tx_signature: order.signature,
             block_time: Clickhouse.formatDateTime(order.time),
             usd_value: order.usdValue,
+            pricing_status: order.pricingStatus,
+            pricing_error: order.pricingError,
             event_type: order.kind === "OrderCreated" ? "created" : "fulfilled",
         }));
         await this.client.insert({

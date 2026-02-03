@@ -1,4 +1,4 @@
-import { createLogger } from "@dln/shared";
+import { createLogger, type PricingStatus } from "@dln/shared";
 import Bottleneck from "bottleneck";
 import { getTokenPrice, getTokenDecimals, calculateUsdValue } from "./price";
 
@@ -24,6 +24,12 @@ interface DlnOrderLiteModel {
     };
 }
 
+interface PricingResult {
+    usdValue: number | null;
+    pricingStatus: PricingStatus;
+    pricingError: string | null;
+}
+
 const MAX_RETRIES = 10;
 const RETRY_DELAY_MS = 1000;
 
@@ -31,10 +37,18 @@ function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function okResult(usdValue: number): PricingResult {
+    return { usdValue, pricingStatus: "ok", pricingError: null };
+}
+
+function errorResult(pricingError: string): PricingResult {
+    return { usdValue: null, pricingStatus: "error", pricingError };
+}
+
 /**
  * Get USD value for a fulfilled order from DLN API + Jupiter
  */
-export async function getUsdValueFromDlnApi(orderId: string): Promise<number> {
+export async function getUsdValueFromDlnApi(orderId: string): Promise<PricingResult> {
     const orderIdHex = orderId.startsWith("0x") ? orderId : `0x${orderId}`;
     const url = `${DLN_API_BASE}/Orders/${orderIdHex}/liteModel`;
     let delayMs = RETRY_DELAY_MS;
@@ -47,27 +61,27 @@ export async function getUsdValueFromDlnApi(orderId: string): Promise<number> {
                 // Verify order is on Solana
                 if (data.takeOffer.chainId.bigIntegerValue !== SOLANA_CHAIN_ID) {
                     logger.warn({ orderId: orderId.slice(0, 16), chainId: data.takeOffer.chainId.bigIntegerValue }, "Order not on Solana");
-                    return -1;
+                    return errorResult("not_solana");
                 }
                 // Get Solana token price from Jupiter
                 const mint = data.takeOffer.tokenAddress.stringValue === NATIVE_SOL
                     ? WRAPPED_SOL
                     : data.takeOffer.tokenAddress.stringValue;
                 const amount = BigInt(data.takeOffer.amount.stringValue);
-                if (amount === BigInt(0)) return 0;
+                if (amount === BigInt(0)) return okResult(0);
                 const price = await getTokenPrice(mint);
                 if (price === null) {
                     logger.warn({ orderId: orderId.slice(0, 16), mint }, "No Jupiter price available");
-                    return -1;
+                    return errorResult("no_price");
                 }
                 const decimals = getTokenDecimals(mint);
                 const usdValue = calculateUsdValue(amount, decimals, price);
                 logger.debug({ orderId: orderId.slice(0, 16), mint, price, usdValue }, "USD value calculated");
-                return usdValue;
+                return okResult(usdValue);
             }
             if (response.status === 404) {
                 logger.error({ orderId: orderId.slice(0, 16) }, "Order not found in DLN API");
-                return -1;
+                return errorResult("order_not_found");
             }
             if (response.status === 429 && attempt < MAX_RETRIES) {
                 logger.warn({ orderId: orderId.slice(0, 16), attempt, delayMs }, "DLN API rate limited, retrying...");
@@ -76,7 +90,7 @@ export async function getUsdValueFromDlnApi(orderId: string): Promise<number> {
                 continue;
             }
             logger.warn({ status: response.status, orderId: orderId.slice(0, 16) }, "DLN API error");
-            return -1;
+            return errorResult(`api_status_${response.status}`);
         } catch (err) {
             if (attempt < MAX_RETRIES) {
                 logger.warn({ err, orderId: orderId.slice(0, 16), attempt }, "DLN API request failed, retrying...");
@@ -85,8 +99,8 @@ export async function getUsdValueFromDlnApi(orderId: string): Promise<number> {
                 continue;
             }
             logger.error({ err, orderId: orderId.slice(0, 16) }, "Failed to fetch from DLN API");
-            return -1;
+            return errorResult("request_failed");
         }
     }
-    return -1;
+    return errorResult("max_retries_exceeded");
 }

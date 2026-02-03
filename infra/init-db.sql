@@ -6,7 +6,9 @@ CREATE TABLE IF NOT EXISTS dln.orders (
   order_id String,
   tx_signature String,
   block_time DateTime,
-  usd_value Float64,
+  usd_value Nullable(Float64),
+  pricing_status LowCardinality(String) DEFAULT 'ok',
+  pricing_error Nullable(String),
   event_type LowCardinality(String),  -- 'created' or 'fulfilled'
   created_at DateTime DEFAULT now()
 )
@@ -24,7 +26,7 @@ AS SELECT
   toDate(block_time) AS date,
   event_type,
   count() AS order_count,
-  sum(usd_value) AS volume_usd
+  sumIf(ifNull(usd_value, 0), pricing_status = 'ok') AS volume_usd
 FROM dln.orders
 GROUP BY date, event_type;
 

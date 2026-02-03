@@ -240,6 +240,8 @@ export class Indexer {
             signature: sigInfo.signature,
             time: txBlockTime,
             usdValue,
+            pricingStatus: "ok",
+            pricingError: null,
             kind: this.kind,
         };
         await this.analytics.insertOrders([order]);
@@ -255,12 +257,14 @@ export class Indexer {
             const data = event.data as unknown as FulfilledData;
             const orderId = Buffer.from(data.orderId).toString("hex");
             // Fetch USD value from DLN API
-            const usdValue = await getUsdValueFromDlnApi(orderId);
+            const pricing = await getUsdValueFromDlnApi(orderId);
             const order: Order = {
                 orderId,
                 signature: sigInfo.signature,
                 time: txBlockTime,
-                usdValue,
+                usdValue: pricing.usdValue,
+                pricingStatus: pricing.pricingStatus,
+                pricingError: pricing.pricingError,
                 kind: this.kind,
             };
             await this.analytics.insertOrders([order]);
