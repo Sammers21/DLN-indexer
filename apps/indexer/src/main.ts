@@ -1,22 +1,17 @@
 import { config, createLogger } from "@dln/shared";
 import { Indexer } from "./indexer";
 import { SolanaClient } from "./solana";
-import { Redis, Clickhouse, CompositeOrderStorage } from "./storage";
+import { Redis, Clickhouse } from "./storage";
 
 const logger = createLogger("indexer");
 
 async function main(): Promise<void> {
   logger.info("DLN Indexer starting");
   const solana = new SolanaClient();
-  // Redis: implements CheckpointStore + OrderStorage (cache with 1-day TTL)
   const redis = new Redis(config.redis.url);
-  // ClickHouse: implements Analytics + OrderStorage (permanent storage)
   const clickhouse = new Clickhouse(config.clickhouse.host);
-  // Composite storage: tries Redis first (fast), then ClickHouse (permanent)
-  const orderStorage = new CompositeOrderStorage([redis, clickhouse]);
-  // Create two indexer instances, one for each order kind
-  const srcIndexer = new Indexer(solana, redis, orderStorage, "OrderCreated");
-  const dstIndexer = new Indexer(solana, redis, orderStorage, "OrderFulfilled");
+  const srcIndexer = new Indexer(solana, redis, clickhouse, "OrderCreated");
+  const dstIndexer = new Indexer(solana, redis, clickhouse, "OrderFulfilled");
   async function shutdown(code: number): Promise<void> {
     srcIndexer.stop();
     dstIndexer.stop();
@@ -26,7 +21,6 @@ async function main(): Promise<void> {
   process.on("SIGINT", () => shutdown(0));
   process.on("SIGTERM", () => shutdown(0));
   try {
-    // Start both indexers in parallel (they run indefinitely)
     const srcIndexing = srcIndexer.startIndexing();
     const dstIndexing = dstIndexer.startIndexing();
     // Monitor progress

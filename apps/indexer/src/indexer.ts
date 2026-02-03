@@ -2,10 +2,9 @@ import { PublicKey, ConfirmedSignatureInfo, VersionedTransactionResponse } from 
 import { BorshCoder, EventParser } from "@coral-xyz/anchor";
 import { config, createLogger, DLN_SRC_IDL, DLN_DST_IDL } from "@dln/shared";
 import { Checkpoint, CheckpointStore, ProgramType } from "./checkpoint";
-import { Order, OrderKind } from "./analytics";
+import { Analytics, Order, OrderKind } from "./analytics";
 import { SolanaClient } from "./solana";
 import { getUsdValue } from "./price";
-import { OrderStorage } from "./storage";
 
 const logger = createLogger("indexer");
 
@@ -67,7 +66,7 @@ const dstEventParser = new EventParser(DLN_DST, dstCoder);
 export class Indexer {
     private readonly solana: SolanaClient;
     private readonly checkpointStore: CheckpointStore;
-    private readonly orderStorage: OrderStorage;
+    private readonly analytics: Analytics;
     private readonly kind: OrderKind;
     private readonly programId: PublicKey;
     private readonly programType: ProgramType;
@@ -75,16 +74,15 @@ export class Indexer {
     private checkpoint: Checkpoint | null = null;
     private lastCheckpointSaveTime = 0;
     private running = false;
-    private skippedFulfilledCount = 0;
     constructor(
         solana: SolanaClient,
         checkpointStore: CheckpointStore,
-        orderStorage: OrderStorage,
+        analytics: Analytics,
         kind: OrderKind
     ) {
         this.solana = solana;
         this.checkpointStore = checkpointStore;
-        this.orderStorage = orderStorage;
+        this.analytics = analytics;
         this.kind = kind;
         this.programId = kind === "OrderCreated" ? DLN_SRC : DLN_DST;
         this.programType = kind === "OrderCreated" ? "src" : "dst";
@@ -209,8 +207,7 @@ export class Indexer {
             usdValue,
             kind: this.kind,
         };
-        // Save to OrderStorage (CompositeStorage saves to Redis + ClickHouse)
-        await this.orderStorage.saveOrder(order);
+        await this.analytics.insertOrders([order]);
         return order;
     }
     private async processOrderFulfilled(
@@ -222,39 +219,17 @@ export class Indexer {
             if (event.name !== "Fulfilled") continue;
             const data = event.data as unknown as FulfilledData;
             const orderId = Buffer.from(data.orderId).toString("hex");
-            // Wait until OrderCreated indexer has processed past this transaction's time
-            await this.waitForOrderCreatedIndexer(txBlockTime);
-            // Lookup the original OrderCreated
-            const storedOrder = await this.orderStorage.findOrderById(orderId);
-            if (!storedOrder) {
-                this.skippedFulfilledCount++;
-                logger.info({ orderId, skippedTotal: this.skippedFulfilledCount }, "OrderCreated not found, skipping OrderFulfilled");
-                return null;
-            }
-            logger.info({ orderId, usdValue: storedOrder.usdValue }, "Found cached OrderCreated");
             const order: Order = {
                 orderId,
                 signature: sigInfo.signature,
                 time: txBlockTime,
-                usdValue: storedOrder.usdValue,
+                usdValue: -1,
                 kind: this.kind,
             };
-            // Save to OrderStorage (CompositeStorage saves to Redis + ClickHouse)
-            await this.orderStorage.saveOrder(order);
+            await this.analytics.insertOrders([order]);
             return order;
         }
         return null;
-    }
-    private async waitForOrderCreatedIndexer(txBlockTime: number): Promise<void> {
-        // Poll until OrderCreated checkpoint is ahead of this transaction
-        while (this.running) {
-            const srcCheckpoint = await this.checkpointStore.getCheckpoint("src");
-            if (srcCheckpoint && srcCheckpoint.blockTime > txBlockTime) {
-                return;
-            }
-            logger.info(`OrderFulfilled waiting for OrderCreated indexer: txBlockTime=${formatTime(txBlockTime)}, srcCheckpoint=${srcCheckpoint ? formatTime(srcCheckpoint.blockTime) : "none"}`);
-            await this.sleep(1000);
-        }
     }
     private async updateCheckpoint(sigInfo: ConfirmedSignatureInfo): Promise<void> {
         const now = Date.now();

@@ -1,32 +1,20 @@
 import IORedis from "ioredis";
 import { config, createLogger } from "@dln/shared";
 import { Checkpoint, CheckpointStore, ProgramType } from "../checkpoint";
-import { Order } from "../analytics";
-import { OrderStorage } from "./storage";
 
 const logger = createLogger("redis");
 
 const CHECKPOINT_PREFIX = "indexer:checkpoint:";
-const CHECKPOINT_DB = 0;
-const ORDER_PREFIX = "order:";
-const ORDER_DB = 1;
-const ORDER_TTL_SECONDS = 24 * 60 * 60; // 1 day
 
-export class Redis implements CheckpointStore, OrderStorage {
-    private readonly checkpointClient: IORedis;
-    private readonly orderClient: IORedis;
+export class Redis implements CheckpointStore {
+    private readonly client: IORedis;
     constructor(url?: string) {
-        const redisUrl = url ?? config.redis.url;
-        this.checkpointClient = new IORedis(redisUrl, { db: CHECKPOINT_DB });
-        this.checkpointClient.on("connect", () => logger.info({ db: CHECKPOINT_DB }, "Redis checkpoint client connected"));
-        this.checkpointClient.on("error", (err) => logger.error({ err, db: CHECKPOINT_DB }, "Redis checkpoint error"));
-        this.orderClient = new IORedis(redisUrl, { db: ORDER_DB });
-        this.orderClient.on("connect", () => logger.info({ db: ORDER_DB }, "Redis order client connected"));
-        this.orderClient.on("error", (err) => logger.error({ err, db: ORDER_DB }, "Redis order error"));
+        this.client = new IORedis(url ?? config.redis.url);
+        this.client.on("connect", () => logger.info("Redis connected"));
+        this.client.on("error", (err) => logger.error({ err }, "Redis error"));
     }
-    // CheckpointStore implementation
     async getCheckpoint(program: ProgramType): Promise<Checkpoint | null> {
-        const data = await this.checkpointClient.get(`${CHECKPOINT_PREFIX}${program}`);
+        const data = await this.client.get(`${CHECKPOINT_PREFIX}${program}`);
         if (!data) return null;
         try {
             return JSON.parse(data) as Checkpoint;
@@ -47,29 +35,11 @@ export class Redis implements CheckpointStore, OrderStorage {
                 hour12: false,
             }),
         };
-        await this.checkpointClient.set(`${CHECKPOINT_PREFIX}${program}`, JSON.stringify(data));
+        await this.client.set(`${CHECKPOINT_PREFIX}${program}`, JSON.stringify(data));
         logger.debug({ program, checkpoint: data }, "Checkpoint saved");
     }
-    // OrderStorage implementation
-    async findOrderById(orderId: string): Promise<Order | null> {
-        const data = await this.orderClient.get(`${ORDER_PREFIX}${orderId}`);
-        if (!data) return null;
-        try {
-            const order = JSON.parse(data) as Order;
-            logger.debug({ orderId }, "Order found in Redis cache");
-            return order;
-        } catch (err) {
-            logger.warn({ err, orderId }, "Failed to parse cached order");
-            return null;
-        }
-    }
-    async saveOrder(order: Order): Promise<void> {
-        const data = JSON.stringify(order);
-        await this.orderClient.setex(`${ORDER_PREFIX}${order.orderId}`, ORDER_TTL_SECONDS, data);
-        logger.debug({ orderId: order.orderId }, "Order saved to Redis cache");
-    }
     async close(): Promise<void> {
-        await Promise.all([this.checkpointClient.quit(), this.orderClient.quit()]);
+        await this.client.quit();
         logger.info("Redis closed");
     }
 }
