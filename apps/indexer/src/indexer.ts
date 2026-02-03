@@ -108,15 +108,11 @@ export class Indexer {
         }
         while (this.running) {
             try {
-                // 1. Fetch new transactions (upwards/forward)
-                const signaturesUpwards = await this.solana.getSignaturesForAddress(this.programId, {
-                    limit: config.indexer.batchSize,
-                    until: this.checkpoint?.to.signature,
-                });
+                // 1. Fetch new transactions (upwards/forward) with pagination to avoid skips
+                const signaturesUpwards = await this.getForwardSignatures();
                 // Process upwards signatures (oldest-first for chronological order)
                 if (signaturesUpwards.length > 0) {
-                    const chronological = signaturesUpwards.reverse();
-                    for (const sigInfo of chronological) {
+                    for (const sigInfo of signaturesUpwards) {
                         if (!this.running) break;
                         await this.handleSignature(sigInfo, "forward");
                     }
@@ -147,6 +143,30 @@ export class Indexer {
     stop(): void {
         this.running = false;
         logger.info({ kind: this.kind }, "Indexer stopping");
+    }
+    private async getForwardSignatures(): Promise<ConfirmedSignatureInfo[]> {
+        const limit = config.indexer.batchSize;
+        if (!this.checkpoint) {
+            const batch = await this.solana.getSignaturesForAddress(this.programId, { limit });
+            return batch.reverse();
+        }
+        const checkpointSig = this.checkpoint.to.signature;
+        const newestFirst: ConfirmedSignatureInfo[] = [];
+        let before: string | undefined = undefined;
+        while (true) {
+            const batch = await this.solana.getSignaturesForAddress(this.programId, { limit, before });
+            if (batch.length === 0) break;
+            const checkpointIndex = batch.findIndex((sig) => sig.signature === checkpointSig);
+            if (checkpointIndex >= 0) {
+                if (checkpointIndex > 0) newestFirst.push(...batch.slice(0, checkpointIndex));
+                break;
+            }
+            newestFirst.push(...batch);
+            if (batch.length < limit) break;
+            before = batch[batch.length - 1].signature;
+        }
+        if (newestFirst.length === 0) return [];
+        return newestFirst.reverse();
     }
     private async handleSignature(sigInfo: ConfirmedSignatureInfo, direction: Direction): Promise<void> {
         if (sigInfo.err) {
