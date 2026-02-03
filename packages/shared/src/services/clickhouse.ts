@@ -7,6 +7,7 @@ const logger = createLogger("clickhouse");
 
 export class Clickhouse implements Analytics {
     private readonly client: ClickHouseClient;
+    private readonly database?: string;
     constructor(host?: string) {
         this.client = createClient({
             url: host ?? config.clickhouse.host,
@@ -14,6 +15,7 @@ export class Clickhouse implements Analytics {
             username: config.clickhouse.username,
             password: config.clickhouse.password,
         });
+        this.database = config.clickhouse.database;
         logger.info("ClickHouse client initialized");
     }
 
@@ -22,12 +24,12 @@ export class Clickhouse implements Analytics {
         const values = orders.map((order) => ({
             order_id: order.orderId,
             tx_signature: order.signature,
-            block_time: new Date(order.time * 1000).toISOString().slice(0, 19),
+            block_time: Clickhouse.formatDateTime(order.time),
             usd_value: order.usdValue,
             event_type: order.kind === "OrderCreated" ? "created" : "fulfilled",
         }));
         await this.client.insert({
-            table: "dln.orders",
+            table: this.table("orders"),
             values,
             format: "JSONEachRow",
         });
@@ -37,7 +39,7 @@ export class Clickhouse implements Analytics {
     async getOrderCount(kind: OrderKind): Promise<number> {
         const eventType = kind === "OrderCreated" ? "created" : "fulfilled";
         const result = await this.client.query({
-            query: `SELECT count() as cnt FROM dln.orders WHERE event_type = {eventType:String}`,
+            query: `SELECT count() as cnt FROM ${this.table("orders")} WHERE event_type = {eventType:String}`,
             query_params: { eventType },
             format: "JSONEachRow",
         });
@@ -52,7 +54,7 @@ export class Clickhouse implements Analytics {
                     count() as cnt,
                     toString(min(toDate(block_time))) as min_date,
                     toString(max(toDate(block_time))) as max_date
-                FROM orders FINAL
+                FROM ${this.table("orders")} FINAL
             `,
             format: "JSONEachRow",
         });
@@ -84,7 +86,7 @@ export class Clickhouse implements Analytics {
                     toString(date) as period,
                     sum(order_count) as order_count,
                     sum(volume_usd) as volume_usd
-                FROM daily_volumes_mv FINAL
+                FROM ${this.table("daily_volumes_mv")} FINAL
                 ${whereClause}
                 GROUP BY date
                 ORDER BY date ASC
@@ -98,5 +100,15 @@ export class Clickhouse implements Analytics {
     async close(): Promise<void> {
         await this.client.close();
         logger.info("ClickHouse client closed");
+    }
+
+    private table(name: string): string {
+        if (!this.database) return name;
+        return `${this.database}.${name}`;
+    }
+
+    private static formatDateTime(unixSeconds: number): string {
+        const iso = new Date(unixSeconds * 1000).toISOString().slice(0, 19);
+        return iso.replace("T", " ");
     }
 }
