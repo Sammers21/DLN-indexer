@@ -4,6 +4,7 @@ import { config, createLogger, DLN_SRC_IDL, DLN_DST_IDL } from "@dln/shared";
 import { Checkpoint, CheckpointStore, ProgramType } from "./checkpoint";
 import { Analytics, Order, OrderKind } from "./analytics";
 import { SolanaClient } from "./solana";
+import { getUsdValue } from "./price";
 
 const logger = createLogger("indexer");
 
@@ -18,6 +19,49 @@ function formatTime(timestamp: number): string {
         second: "2-digit",
         hour12: false,
     });
+}
+
+// Convert big-endian byte array to bigint
+function bytesToBigInt(bytes: number[]): bigint {
+    let result = BigInt(0);
+    for (const byte of bytes) {
+        result = (result << BigInt(8)) + BigInt(byte);
+    }
+    return result;
+}
+
+// Offer struct from DLN
+interface Offer {
+    chainId: number[];
+    tokenAddress: number[];
+    amount: number[];
+}
+
+// Order struct from CreatedOrder event
+interface DlnOrder {
+    makerOrderNonce: bigint;
+    makerSrc: number[];
+    give: Offer;
+    take: Offer;
+    receiverDst: number[];
+    givePatchAuthoritySrc: number[];
+    orderAuthorityAddressDst: number[];
+    allowedTakerDst: number[] | null;
+    allowedCancelBeneficiarySrc: number[] | null;
+    externalCall: { externalCallShortcut: number[] } | null;
+}
+
+// CreatedOrder event data
+interface CreatedOrderData {
+    order: DlnOrder;
+    fixFee: bigint;
+    percentFee: bigint;
+}
+
+// Fulfilled event data
+interface FulfilledData {
+    orderId: number[];
+    taker: PublicKey;
 }
 
 const DLN_SRC = new PublicKey(config.dln.srcProgramId);
@@ -36,7 +80,6 @@ export class Indexer {
     private readonly programId: PublicKey;
     private readonly programType: ProgramType;
     private readonly eventParser: EventParser;
-    private readonly eventName: string;
     private checkpoint: Checkpoint | null = null;
     private running = false;
     constructor(
@@ -52,7 +95,6 @@ export class Indexer {
         this.programId = kind === "OrderCreated" ? DLN_SRC : DLN_DST;
         this.programType = kind === "OrderCreated" ? "src" : "dst";
         this.eventParser = kind === "OrderCreated" ? srcEventParser : dstEventParser;
-        this.eventName = kind === "OrderCreated" ? "CreatedOrder" : "Fulfilled";
     }
     getCheckpoint(): Checkpoint | null {
         return this.checkpoint;
@@ -91,7 +133,7 @@ export class Indexer {
                 for (const sigInfo of validSigs) {
                     const tx = await this.solana.getTransaction(sigInfo.signature);
                     if (!tx) continue;
-                    const orders = this.parseTransactionLogs(tx, sigInfo);
+                    const orders = await this.parseTransactionLogs(tx, sigInfo);
                     allOrders.push(...orders);
                     latestSigInfo = sigInfo;
                 }
@@ -148,25 +190,63 @@ export class Indexer {
         }
         return this.solana.getSignaturesForAddress(programId, options);
     }
-    private parseTransactionLogs(
+    private async parseTransactionLogs(
         tx: VersionedTransactionResponse,
         sigInfo: ConfirmedSignatureInfo
-    ): Order[] {
+    ): Promise<Order[]> {
         const orders: Order[] = [];
         if (!tx.meta?.logMessages) return orders;
         try {
             const events = this.eventParser.parseLogs(tx.meta.logMessages);
-            for (const event of events) {
-                if (event.name === this.eventName) {
-                    const data = event.data as { orderId: number[] };
-                    const orderId = Buffer.from(data.orderId).toString("hex");
+            const eventsList = Array.from(events);
+            if (eventsList.length > 0) {
+                logger.debug({
+                    signature: sigInfo.signature,
+                    kind: this.kind,
+                    eventsFound: eventsList.map((e) => e.name),
+                }, "Events found in transaction");
+            }
+            if (this.kind === "OrderCreated") {
+                // For OrderCreated, we need both CreatedOrder (has amounts) and CreatedOrderId (has orderId)
+                let createdOrderData: CreatedOrderData | null = null;
+                let orderId: string | null = null;
+                for (const event of eventsList) {
+                    if (event.name === "CreatedOrder") {
+                        createdOrderData = event.data as unknown as CreatedOrderData;
+                    } else if (event.name === "CreatedOrderId") {
+                        const data = event.data as unknown as { orderId: number[] };
+                        orderId = Buffer.from(data.orderId).toString("hex");
+                    }
+                }
+                if (createdOrderData && orderId) {
+                    // Extract give token and amount (what maker is giving)
+                    const giveTokenBytes = createdOrderData.order.give.tokenAddress;
+                    const giveAmountBytes = createdOrderData.order.give.amount;
+                    // Calculate USD value using Jupiter price
+                    const usdValue = await getUsdValue(giveTokenBytes, giveAmountBytes);
                     orders.push({
                         orderId,
                         signature: sigInfo.signature,
                         time: sigInfo.blockTime ?? Math.floor(Date.now() / 1000),
-                        usdValue: 0, // TODO: calculate USD value
+                        usdValue,
                         kind: this.kind,
                     });
+                }
+            } else {
+                // For OrderFulfilled, the Fulfilled event has orderId directly
+                // Note: We could look up the original order's USD value from DB, but for now use 0
+                for (const event of eventsList) {
+                    if (event.name === "Fulfilled") {
+                        const data = event.data as unknown as FulfilledData;
+                        const orderId = Buffer.from(data.orderId).toString("hex");
+                        orders.push({
+                            orderId,
+                            signature: sigInfo.signature,
+                            time: sigInfo.blockTime ?? Math.floor(Date.now() / 1000),
+                            usdValue: 0, // Fulfilled events don't have amount data
+                            kind: this.kind,
+                        });
+                    }
                 }
             }
         } catch (err) {

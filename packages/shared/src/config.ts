@@ -1,4 +1,19 @@
-import "dotenv/config";
+import { config as dotenvConfig } from "dotenv";
+import { resolve } from "path";
+import { existsSync } from "fs";
+
+// Try to load .env from various locations (monorepo root first)
+const envPaths = [
+  resolve(process.cwd(), ".env"),
+  resolve(process.cwd(), "..", "..", ".env"),
+  resolve(process.cwd(), "..", ".env"),
+];
+for (const envPath of envPaths) {
+  if (existsSync(envPath)) {
+    dotenvConfig({ path: envPath });
+    break;
+  }
+}
 
 // Disable proxy for all requests
 process.env.NO_PROXY = process.env.NO_PROXY || "*";
