@@ -14,13 +14,39 @@ function buildProgramLogs(programId: PublicKey, base64Event: string): string[] {
     ];
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+    if (typeof value !== "object" || value === null) return false;
+    const proto = Object.getPrototypeOf(value);
+    return proto === Object.prototype || proto === null;
+}
+
+function normalizeBorshInput(value: unknown): unknown {
+    if (value === null || value === undefined) return value;
+    if (Buffer.isBuffer(value)) return value;
+    if (value instanceof Uint8Array) return Buffer.from(value);
+    if (value instanceof PublicKey) return value;
+    if (value instanceof BN) return value;
+    if (Array.isArray(value)) {
+        if (value.every((item) => typeof item === "number")) return Buffer.from(value);
+        return value.map((item) => normalizeBorshInput(item));
+    }
+    if (isPlainObject(value)) {
+        const normalized: Record<string, unknown> = {};
+        for (const [key, nested] of Object.entries(value)) {
+            normalized[key] = normalizeBorshInput(nested);
+        }
+        return normalized;
+    }
+    return value;
+}
+
 function encodeEvent(idl: unknown, eventName: string, data: Record<string, unknown>): string {
     const eventCoder = new BorshEventCoder(idl as never);
     const layouts = (eventCoder as unknown as { layouts: Map<string, { encode: (src: unknown, buffer: Buffer, offset?: number) => number }> }).layouts;
     const layout = layouts.get(eventName);
     if (!layout) throw new Error(`Missing layout for event ${eventName}`);
     const buffer = Buffer.alloc(2048);
-    const span = layout.encode(data, buffer);
+    const span = layout.encode(normalizeBorshInput(data), buffer);
     const discriminator = eventDiscriminator(eventName);
     return Buffer.concat([Buffer.from(discriminator), buffer.slice(0, span)]).toString("base64");
 }

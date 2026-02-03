@@ -1,5 +1,8 @@
 # DLN Order Indexer
 
+[![CI](https://github.com/Sammers21/DLN-indexer/actions/workflows/ci.yml/badge.svg)](https://github.com/Sammers21/DLN-indexer/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/Sammers21/DLN-indexer/graph/badge.svg)](https://codecov.io/gh/Sammers21/DLN-indexer)
+
 A production-ready application that indexes DLN (deBridge Liquidity Network) order events on Solana, aggregates daily USD volumes, and visualizes the data in an analytical dashboard.
 
 ## Features

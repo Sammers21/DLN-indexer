@@ -1,0 +1,43 @@
+replicaCount: 1
+
+image:
+  repository: dln-api
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 3000
+
+env:
+  API_HOST: "0.0.0.0"
+  API_PORT: "3000"
+  CLICKHOUSE_HOST: "http://clickhouse:8123"
+  CLICKHOUSE_DATABASE: "dln"
+  CLICKHOUSE_USER: "dln_admin"
+  CLICKHOUSE_PASSWORD: "G6lxIxGvddWE5eTJ"
+  REDIS_URL: "redis://:password@redis:6379"
+  SOLANA_RPC_URL: "https://api.mainnet-beta.solana.com"
+  SOLANA_RPS: "10"
+  INDEXER_BATCH_SIZE: "50"
+  INDEXER_DELAY_MS: "10000"
+  JUPITER_API_KEY: ""
+
+resources: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+nameOverride: ""
+fullnameOverride: ""
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: dln.local
+      paths:
+        - path: /api
+          pathType: Prefix
+  tls: []
