@@ -23,5 +23,8 @@
   "devDependencies": {
     "prettier": "^3.4.2",
     "turbo": "^2.4.2"
+  },
+  "dependencies": {
+    "ioredis": "5.9.2"
   }
 }
