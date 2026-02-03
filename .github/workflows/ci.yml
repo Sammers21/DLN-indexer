@@ -58,6 +58,13 @@ jobs:
 
   docker-build:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - { name: api, file: apps/api/Dockerfile }
+          - { name: indexer, file: apps/indexer/Dockerfile }
+          - { name: dashboard, file: apps/dashboard/Dockerfile }
 
     steps:
       - name: Checkout
@@ -66,25 +73,11 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build API image
+      - name: Build ${{ matrix.image.name }} image
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: apps/api/Dockerfile
-          push: false
-
-      - name: Build Indexer image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: apps/indexer/Dockerfile
-          push: false
-
-      - name: Build Dashboard image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: apps/dashboard/Dockerfile
+          file: ${{ matrix.image.file }}
           push: false
 
   lint:
