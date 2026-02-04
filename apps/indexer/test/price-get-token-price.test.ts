@@ -86,9 +86,9 @@ describe("getTokenPrice", () => {
         if (key === `solana:${mint}`) return 99.99;
         return null;
       },
-      setCachedPrice: async () => { },
+      setCachedPrice: async () => {},
       getCachedDecimals: async () => null,
-      setCachedDecimals: async () => { },
+      setCachedDecimals: async () => {},
     };
     setPriceCache(mockRedis as never);
     // fetch should not be called
@@ -115,7 +115,7 @@ describe("getTokenPrice", () => {
         cachedPrice = price;
       },
       getCachedDecimals: async () => null,
-      setCachedDecimals: async () => { },
+      setCachedDecimals: async () => {},
     };
     setPriceCache(mockRedis as never);
     globalThis.fetch = async () =>
@@ -173,12 +173,12 @@ describe("getTokenDecimals", () => {
     const mint = "CustomMint11111111111111111111111111111111";
     const mockRedis = {
       getCachedPrice: async () => null,
-      setCachedPrice: async () => { },
+      setCachedPrice: async () => {},
       getCachedDecimals: async (key: string) => {
         if (key === `solana:${mint}`) return 8;
         return null;
       },
-      setCachedDecimals: async () => { },
+      setCachedDecimals: async () => {},
     };
     setPriceCache(mockRedis as never);
     const decimals = await getTokenDecimals(mint);
@@ -233,9 +233,9 @@ describe("setPriceCache", () => {
     const mod = await import("../src/price.js");
     const mockRedis = {
       getCachedPrice: async () => null,
-      setCachedPrice: async () => { },
+      setCachedPrice: async () => {},
       getCachedDecimals: async () => null,
-      setCachedDecimals: async () => { },
+      setCachedDecimals: async () => {},
     };
     // Should not throw
     mod.setPriceCache(mockRedis as never);

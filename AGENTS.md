@@ -2,7 +2,7 @@
 
 ## ⚠️ Before Completing Work
 
-**All work must pass these checks:**
+**Only run these checks if the agent changed any source files as part of its work/iteration. If no source files were modified, do not run these commands.**
 
 ```bash
 bun run test       # All tests must pass
