@@ -1,3 +1,6 @@
+// Set required env vars before imports to avoid requireEnv errors in CI
+process.env.CLICKHOUSE_PASSWORD = process.env.CLICKHOUSE_PASSWORD || "test";
+
 import { describe, it } from "mocha";
 import { expect } from "chai";
 import { Clickhouse } from "@dln/shared";
@@ -178,7 +181,7 @@ describe("Clickhouse service", () => {
             { cnt: "0", min_date: "1970-01-01", max_date: "1970-01-01" },
           ],
         }),
-        insert: async () => {},
+        insert: async () => { },
       };
       const range = await ch.getDefaultRange();
       expect(range.from).to.equal("");
@@ -193,7 +196,7 @@ describe("Clickhouse service", () => {
             { cnt: "100", min_date: "2024-01-01", max_date: "2024-06-30" },
           ],
         }),
-        insert: async () => {},
+        insert: async () => { },
       };
       const range = await ch.getDefaultRange();
       expect(range.from).to.equal("2024-01-01");
@@ -204,7 +207,7 @@ describe("Clickhouse service", () => {
       const ch = new Clickhouse("http://localhost:8123");
       (ch as unknown as { client: MockClient }).client = {
         query: async () => ({ json: async () => [] }),
-        insert: async () => {},
+        insert: async () => { },
       };
       const range = await ch.getDefaultRange();
       expect(range.from).to.equal("");

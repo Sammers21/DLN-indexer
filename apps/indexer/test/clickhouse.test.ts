@@ -1,3 +1,6 @@
+// Set required env vars before imports to avoid requireEnv errors in CI
+process.env.CLICKHOUSE_PASSWORD = process.env.CLICKHOUSE_PASSWORD || "test";
+
 import { describe, it } from "mocha";
 import { expect } from "chai";
 import { Clickhouse } from "@dln/shared";
