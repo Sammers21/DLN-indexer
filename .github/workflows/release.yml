@@ -133,8 +133,25 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  deploy-indexer:
+  deploy-env:
     needs: [check-changes, build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && (contains(github.event.head_commit.message, 'release-indexer') || contains(github.event.head_commit.message, 'release-api'))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write .env file to production server
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.APP_HOST }}
+          username: ${{ secrets.SSH_HOST_USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            mkdir -p /opt/dln
+            cat > /opt/dln/.env << 'ENVEOF'
+            ${{ secrets.DLN_ENV_FILE }}
+            ENVEOF
+
+  deploy-indexer:
+    needs: [check-changes, build, deploy-env]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, 'release-indexer')
     runs-on: ubuntu-latest
     steps:
@@ -149,13 +166,13 @@ jobs:
             docker stop dln-indexer || true
             docker rm -f dln-indexer || true
             docker run --restart=always --name dln-indexer -d \
+              --network host \
               --env-file /opt/dln/.env \
-              -p 9090:9090 \
               ${{ secrets.DOCKER_REGISTRY }}/dln-indexer:latest
             docker image prune -f || true
 
   deploy-api:
-    needs: [check-changes, build]
+    needs: [check-changes, build, deploy-env]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, 'release-api')
     runs-on: ubuntu-latest
     steps:
@@ -170,8 +187,8 @@ jobs:
             docker stop dln-api || true
             docker rm -f dln-api || true
             docker run --restart=always --name dln-api -d \
+              --network host \
               --env-file /opt/dln/.env \
-              -p 3000:3000 \
               ${{ secrets.DOCKER_REGISTRY }}/dln-api:latest
             docker image prune -f || true
 
@@ -191,6 +208,7 @@ jobs:
             docker stop dln-dashboard || true
             docker rm -f dln-dashboard || true
             docker run --restart=always --name dln-dashboard -d \
-              -p 8080:80 \
+              --add-host=host.docker.internal:host-gateway \
+              -p 8081:80 \
               ${{ secrets.DOCKER_REGISTRY }}/dln-dashboard:latest
             docker image prune -f || true
