@@ -32,11 +32,12 @@ export class SolanaClient {
     this.rpcUrl = rpcUrl ?? config.solana.rpcUrl;
     const requestsPerSecond = rps ?? config.solana.rps;
     // Configure bottleneck for rate limiting
+    // Allow concurrent requests up to RPS cap, but throttle overall rate
     this.limiter = new Bottleneck({
       reservoir: requestsPerSecond,
       reservoirRefreshInterval: 1000,
       reservoirRefreshAmount: requestsPerSecond,
-      maxConcurrent: 1,
+      maxConcurrent: Math.min(requestsPerSecond, 5),
       minTime: Math.floor(1000 / requestsPerSecond),
     });
     // Log when we're being rate limited by bottleneck
@@ -139,6 +140,14 @@ export class SolanaClient {
       "getTransaction",
     );
     return result;
+  }
+  async getTransactions(
+    signatures: string[],
+  ): Promise<(VersionedTransactionResponse | null)[]> {
+    const results = await Promise.all(
+      signatures.map((sig) => this.getTransaction(sig)),
+    );
+    return results;
   }
   private recordMetrics(
     method: RpcMethod,

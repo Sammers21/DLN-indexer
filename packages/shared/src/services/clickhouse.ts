@@ -47,7 +47,7 @@ export class Clickhouse implements Analytics {
   async getOrderCount(kind: OrderKind): Promise<number> {
     const eventType = kind === "OrderCreated" ? "created" : "fulfilled";
     const result = await this.client.query({
-      query: `SELECT count() as cnt FROM ${this.table("orders")} WHERE event_type = {eventType:String}`,
+      query: `SELECT count() as cnt FROM ${this.table("orders")} FINAL WHERE event_type = {eventType:String}`,
       query_params: { eventType },
       format: "JSONEachRow",
     });
@@ -84,24 +84,27 @@ export class Clickhouse implements Analytics {
     const conditions: string[] = ["event_type = {eventType:String}"];
     const queryParams: Record<string, string> = { eventType: params.eventType };
     if (params.from) {
-      conditions.push("date >= {from:Date}");
+      conditions.push("toDate(block_time) >= {from:Date}");
       queryParams.from = params.from.slice(0, 10);
     }
     if (params.to) {
-      conditions.push("date <= {to:Date}");
+      conditions.push("toDate(block_time) <= {to:Date}");
       queryParams.to = params.to.slice(0, 10);
     }
     const whereClause = `WHERE ${conditions.join(" AND ")}`;
+    // Query the source table with FINAL to ensure deduplication.
+    // The SummingMergeTree MV can double-count rows on indexer restart,
+    // so we aggregate from the deduplicated source directly.
     const result = await this.client.query({
       query: `
                 SELECT
-                    toString(date) as period,
-                    sum(order_count) as order_count,
-                    sum(volume_usd) as volume_usd
-                FROM ${this.table("daily_volumes_mv")} FINAL
+                    toString(toDate(block_time)) as period,
+                    count() as order_count,
+                    sum(ifNull(usd_value, 0)) as volume_usd
+                FROM ${this.table("orders")} FINAL
                 ${whereClause}
-                GROUP BY date
-                ORDER BY date ASC
+                GROUP BY toDate(block_time)
+                ORDER BY toDate(block_time) ASC
             `,
       query_params: queryParams,
       format: "JSONEachRow",

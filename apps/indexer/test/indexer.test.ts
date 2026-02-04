@@ -238,29 +238,34 @@ describe("Indexer", () => {
     });
   });
 
-  describe("handleSignature", () => {
+  describe("processBatch", () => {
     it("skips failed transactions but still updates checkpoint", async () => {
       const store = createMockStore();
       const analytics = createMockAnalytics();
+      const mockSolana = {
+        getTransactions: async () => [],
+      } as unknown as SolanaClient;
       const indexer = new Indexer(
-        {} as unknown as SolanaClient,
+        mockSolana,
         store,
         analytics,
         "OrderCreated",
       );
       const internal = indexer as unknown as {
-        handleSignature: (
-          sig: ConfirmedSignatureInfo,
+        processBatch: (
+          sigs: ConfirmedSignatureInfo[],
           dir: "forward" | "backward",
         ) => Promise<void>;
         lastCheckpointSaveTime: number;
+        running: boolean;
       };
       internal.lastCheckpointSaveTime = Date.now();
+      internal.running = true;
 
       const failedSig = makeSigInfo("sig-failed", 100, {
         InstructionError: [0, "Custom"],
       });
-      await internal.handleSignature(failedSig, "forward");
+      await internal.processBatch([failedSig], "forward");
 
       // Checkpoint should still be updated
       const cp = indexer.getCheckpoint();

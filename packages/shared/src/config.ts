@@ -19,6 +19,17 @@ for (const envPath of envPaths) {
 process.env.NO_PROXY = process.env.NO_PROXY || "*";
 process.env.no_proxy = process.env.no_proxy || "*";
 
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(
+      `Missing required environment variable: ${name}. ` +
+        `Copy .env.example to .env and fill in the values.`,
+    );
+  }
+  return value;
+}
+
 export const config = {
   solana: {
     rpcUrl: process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com",
@@ -28,10 +39,10 @@ export const config = {
     host: process.env.CLICKHOUSE_HOST || "http://localhost:8123",
     database: process.env.CLICKHOUSE_DATABASE || "dln",
     username: process.env.CLICKHOUSE_USER || "dln_admin",
-    password: process.env.CLICKHOUSE_PASSWORD || "G6lxIxGvddWE5eTJ",
+    password: requireEnv("CLICKHOUSE_PASSWORD"),
   },
   redis: {
-    url: process.env.REDIS_URL || "redis://:hTcBzuRpphtxJczJ@localhost:6379",
+    url: requireEnv("REDIS_URL"),
   },
   api: {
     port: parseInt(process.env.API_PORT || "3000", 10),

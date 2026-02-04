@@ -58,25 +58,27 @@ afterEach(() => {
 });
 
 describe("Indexer processing", () => {
-  describe("handleSignature with transaction", () => {
+  describe("processBatch with transactions", () => {
     it("skips when transaction is not found", async () => {
       const store = createMockStore();
       const analytics = createMockAnalytics();
       const mockSolana = {
-        getTransaction: async () => null,
+        getTransactions: async () => [null],
       } as unknown as SolanaClient;
 
       const indexer = new Indexer(mockSolana, store, analytics, "OrderCreated");
       const internal = indexer as unknown as {
-        handleSignature: (
-          sig: ConfirmedSignatureInfo,
+        processBatch: (
+          sigs: ConfirmedSignatureInfo[],
           dir: "forward" | "backward",
         ) => Promise<void>;
         lastCheckpointSaveTime: number;
+        running: boolean;
       };
       internal.lastCheckpointSaveTime = Date.now();
+      internal.running = true;
 
-      await internal.handleSignature(makeSigInfo("sig-1", 1000), "forward");
+      await internal.processBatch([makeSigInfo("sig-1", 1000)], "forward");
 
       // Checkpoint should be updated
       const cp = indexer.getCheckpoint();
@@ -90,22 +92,22 @@ describe("Indexer processing", () => {
       const store = createMockStore();
       const analytics = createMockAnalytics();
       const mockSolana = {
-        getTransaction: async () => ({
-          meta: { logMessages: null },
-        }),
+        getTransactions: async () => [{ meta: { logMessages: null } }],
       } as unknown as SolanaClient;
 
       const indexer = new Indexer(mockSolana, store, analytics, "OrderCreated");
       const internal = indexer as unknown as {
-        handleSignature: (
-          sig: ConfirmedSignatureInfo,
+        processBatch: (
+          sigs: ConfirmedSignatureInfo[],
           dir: "forward" | "backward",
         ) => Promise<void>;
         lastCheckpointSaveTime: number;
+        running: boolean;
       };
       internal.lastCheckpointSaveTime = Date.now();
+      internal.running = true;
 
-      await internal.handleSignature(makeSigInfo("sig-2", 2000), "forward");
+      await internal.processBatch([makeSigInfo("sig-2", 2000)], "forward");
 
       expect(analytics.inserted).to.have.length(0);
     });
@@ -114,22 +116,22 @@ describe("Indexer processing", () => {
       const store = createMockStore();
       const analytics = createMockAnalytics();
       const mockSolana = {
-        getTransaction: async () => ({
-          meta: { logMessages: [] },
-        }),
+        getTransactions: async () => [{ meta: { logMessages: [] } }],
       } as unknown as SolanaClient;
 
       const indexer = new Indexer(mockSolana, store, analytics, "OrderCreated");
       const internal = indexer as unknown as {
-        handleSignature: (
-          sig: ConfirmedSignatureInfo,
+        processBatch: (
+          sigs: ConfirmedSignatureInfo[],
           dir: "forward" | "backward",
         ) => Promise<void>;
         lastCheckpointSaveTime: number;
+        running: boolean;
       };
       internal.lastCheckpointSaveTime = Date.now();
+      internal.running = true;
 
-      await internal.handleSignature(makeSigInfo("sig-3", 3000), "forward");
+      await internal.processBatch([makeSigInfo("sig-3", 3000)], "forward");
 
       expect(analytics.inserted).to.have.length(0);
     });
@@ -138,21 +140,23 @@ describe("Indexer processing", () => {
       const store = createMockStore();
       const analytics = createMockAnalytics();
       const mockSolana = {
-        getTransaction: async () => ({
-          meta: {
-            logMessages: [
-              "Program src5qyZHqTqecJV4aY6Cb6zDZLMDzrDKKezs22MPHr4 invoke [1]",
-              "Program log: invalid data that will cause parse error",
-              "Program src5qyZHqTqecJV4aY6Cb6zDZLMDzrDKKezs22MPHr4 success",
-            ],
+        getTransactions: async () => [
+          {
+            meta: {
+              logMessages: [
+                "Program src5qyZHqTqecJV4aY6Cb6zDZLMDzrDKKezs22MPHr4 invoke [1]",
+                "Program log: invalid data that will cause parse error",
+                "Program src5qyZHqTqecJV4aY6Cb6zDZLMDzrDKKezs22MPHr4 success",
+              ],
+            },
           },
-        }),
+        ],
       } as unknown as SolanaClient;
 
       const indexer = new Indexer(mockSolana, store, analytics, "OrderCreated");
       const internal = indexer as unknown as {
-        handleSignature: (
-          sig: ConfirmedSignatureInfo,
+        processBatch: (
+          sigs: ConfirmedSignatureInfo[],
           dir: "forward" | "backward",
         ) => Promise<void>;
         lastCheckpointSaveTime: number;
@@ -160,7 +164,7 @@ describe("Indexer processing", () => {
       internal.lastCheckpointSaveTime = Date.now();
 
       // Should not throw
-      await internal.handleSignature(makeSigInfo("sig-4", 4000), "forward");
+      await internal.processBatch([makeSigInfo("sig-4", 4000)], "forward");
 
       expect(analytics.inserted).to.have.length(0);
     });

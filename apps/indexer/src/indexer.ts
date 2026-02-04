@@ -77,6 +77,9 @@ const dstCoder = new BorshCoder(DLN_DST_IDL);
 const srcEventParser = new EventParser(DLN_SRC, srcCoder);
 const dstEventParser = new EventParser(DLN_DST, dstCoder);
 
+const INSERT_BATCH_SIZE = 100;
+const INSERT_FLUSH_INTERVAL_MS = 5000;
+
 export class Indexer {
   private readonly solana: SolanaClient;
   private readonly checkpointStore: CheckpointStore;
@@ -88,6 +91,8 @@ export class Indexer {
   private checkpoint: Checkpoint | null = null;
   private lastCheckpointSaveTime = 0;
   private running = false;
+  private orderBuffer: Order[] = [];
+  private lastFlushTime = 0;
   constructor(
     solana: SolanaClient,
     checkpointStore: CheckpointStore,
@@ -112,6 +117,7 @@ export class Indexer {
     );
     this.running = true;
     this.lastCheckpointSaveTime = Date.now();
+    this.lastFlushTime = Date.now();
     if (this.checkpoint) {
       logger.info(
         {
@@ -136,10 +142,7 @@ export class Indexer {
         const signaturesUpwards = await this.getForwardSignatures();
         // Process upwards signatures (oldest-first for chronological order)
         if (signaturesUpwards.length > 0) {
-          for (const sigInfo of signaturesUpwards) {
-            if (!this.running) break;
-            await this.handleSignature(sigInfo, "forward");
-          }
+          await this.processBatch(signaturesUpwards, "forward");
         }
         // 2. If upwards batch is small, also fetch backwards
         if (
@@ -154,15 +157,15 @@ export class Indexer {
             },
           );
           // Process backwards signatures (newest-first, going back in time)
-          for (const sigInfo of signaturesBackwards) {
-            if (!this.running) break;
-            await this.handleSignature(sigInfo, "backward");
+          if (signaturesBackwards.length > 0) {
+            await this.processBatch(signaturesBackwards, "backward");
           }
-          // If both directions have no signatures, sleep
+          // If both directions have no signatures, flush remaining and sleep
           if (
             signaturesUpwards.length === 0 &&
             signaturesBackwards.length === 0
           ) {
+            await this.flushOrders();
             logger.info(
               `${this.kind} indexer: No new signatures, waiting ${config.indexer.delayMs}ms`,
             );
@@ -178,8 +181,9 @@ export class Indexer {
       }
     }
   }
-  stop(): void {
+  async stop(): Promise<void> {
     this.running = false;
+    await this.flushOrders();
     logger.info({ kind: this.kind }, "Indexer stopping");
   }
   private async getForwardSignatures(): Promise<ConfirmedSignatureInfo[]> {
@@ -214,39 +218,51 @@ export class Indexer {
     if (newestFirst.length === 0) return [];
     return newestFirst.reverse();
   }
-  private async handleSignature(
-    sigInfo: ConfirmedSignatureInfo,
+  private async processBatch(
+    signatures: ConfirmedSignatureInfo[],
     direction: Direction,
   ): Promise<void> {
-    if (sigInfo.err) {
-      // Skip failed transactions but still update checkpoint
+    // Separate failed vs valid signatures
+    const validSigs = signatures.filter((s) => !s.err);
+    const failedSigs = signatures.filter((s) => s.err);
+    // Fetch all valid transactions in parallel (rate-limited by SolanaClient)
+    const txResults = await this.solana.getTransactions(
+      validSigs.map((s) => s.signature),
+    );
+    // Build a map for quick lookup
+    const txMap = new Map<string, VersionedTransactionResponse | null>();
+    for (let i = 0; i < validSigs.length; i++) {
+      txMap.set(validSigs[i].signature, txResults[i]);
+    }
+    // Process in original order to maintain checkpoint correctness
+    for (const sigInfo of signatures) {
+      if (!this.running) break;
+      if (sigInfo.err) {
+        await this.updateCheckpoint(sigInfo, direction);
+        continue;
+      }
+      const tx = txMap.get(sigInfo.signature) ?? null;
+      if (!tx) {
+        logger.warn({ signature: sigInfo.signature }, "Transaction not found");
+        await this.updateCheckpoint(sigInfo, direction);
+        continue;
+      }
+      const order = await this.processTransaction(tx, sigInfo);
+      if (order) {
+        logger.info(
+          {
+            signature: sigInfo.signature,
+            usdValue: order.usdValue,
+            orderId: order.orderId,
+            kind: this.kind,
+            time: formatTime(order.time),
+            direction,
+          },
+          "Order indexed",
+        );
+      }
       await this.updateCheckpoint(sigInfo, direction);
-      return;
     }
-    // Fetch transaction
-    const tx = await this.solana.getTransaction(sigInfo.signature);
-    if (!tx) {
-      logger.warn({ signature: sigInfo.signature }, "Transaction not found");
-      await this.updateCheckpoint(sigInfo, direction);
-      return;
-    }
-    // Parse and process
-    const order = await this.processTransaction(tx, sigInfo);
-    if (order) {
-      logger.info(
-        {
-          signature: sigInfo.signature,
-          usdValue: order.usdValue,
-          orderId: order.orderId,
-          kind: this.kind,
-          time: formatTime(order.time),
-          direction,
-        },
-        "Order indexed",
-      );
-    }
-    // Update checkpoint
-    await this.updateCheckpoint(sigInfo, direction);
   }
   private async processTransaction(
     tx: VersionedTransactionResponse,
@@ -300,7 +316,7 @@ export class Indexer {
       pricingError: null,
       kind: this.kind,
     };
-    await this.analytics.insertOrders([order]);
+    await this.bufferOrder(order);
     return order;
   }
   private async processOrderFulfilled(
@@ -320,7 +336,7 @@ export class Indexer {
       pricingError: pricing.pricingError,
       kind: this.kind,
     };
-    await this.analytics.insertOrders([order]);
+    await this.bufferOrder(order);
     return order;
   }
   private async updateCheckpoint(
@@ -356,6 +372,27 @@ export class Indexer {
           `to=${this.checkpoint.to.signature.slice(0, 16)}... (${formatTime(this.checkpoint.to.blockTime)})`,
       );
     }
+  }
+  private async bufferOrder(order: Order): Promise<void> {
+    this.orderBuffer.push(order);
+    const elapsed = Date.now() - this.lastFlushTime;
+    if (
+      this.orderBuffer.length >= INSERT_BATCH_SIZE ||
+      elapsed >= INSERT_FLUSH_INTERVAL_MS
+    ) {
+      await this.flushOrders();
+    }
+  }
+  async flushOrders(): Promise<void> {
+    if (this.orderBuffer.length === 0) return;
+    const batch = this.orderBuffer;
+    this.orderBuffer = [];
+    this.lastFlushTime = Date.now();
+    await this.analytics.insertOrders(batch);
+    logger.info(
+      { kind: this.kind, count: batch.length },
+      "Flushed order batch to ClickHouse",
+    );
   }
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));

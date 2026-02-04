@@ -28,7 +28,7 @@ describe("ClickHouse query shaping", () => {
     });
     expect(calls).to.have.length(1);
     expect(calls[0].query).to.include(
-      "WHERE event_type = {eventType:String} AND date >= {from:Date} AND date <= {to:Date}",
+      "WHERE event_type = {eventType:String} AND toDate(block_time) >= {from:Date} AND toDate(block_time) <= {to:Date}",
     );
     expect(calls[0].params).to.deep.equal({
       eventType: "created",
@@ -57,8 +57,8 @@ describe("ClickHouse query shaping", () => {
     await clickhouse.getDailyVolume({ eventType: "fulfilled" });
     expect(calls).to.have.length(1);
     expect(calls[0].query).to.include("WHERE event_type = {eventType:String}");
-    expect(calls[0].query).to.not.include("date >=");
-    expect(calls[0].query).to.not.include("date <=");
+    expect(calls[0].query).to.not.include("toDate(block_time) >=");
+    expect(calls[0].query).to.not.include("toDate(block_time) <=");
     expect(calls[0].params).to.deep.equal({ eventType: "fulfilled" });
   });
 });

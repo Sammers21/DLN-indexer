@@ -13,22 +13,14 @@ CREATE TABLE IF NOT EXISTS dln.orders (
   created_at DateTime DEFAULT now()
 )
 ENGINE = ReplacingMergeTree(created_at)
-PARTITION BY toYYYYMM(block_time)
+PARTITION BY toYYYYMMDD(block_time)
 ORDER BY (order_id, event_type)
 PRIMARY KEY (order_id, event_type);
 
--- Materialized view for daily aggregations
-CREATE MATERIALIZED VIEW IF NOT EXISTS dln.daily_volumes_mv
-ENGINE = SummingMergeTree()
-PARTITION BY toYYYYMM(date)
-ORDER BY (date, event_type)
-AS SELECT
-  toDate(block_time) AS date,
-  event_type,
-  count() AS order_count,
-  sumIf(ifNull(usd_value, 0), pricing_status = 'ok') AS volume_usd
-FROM dln.orders
-GROUP BY date, event_type;
+-- Daily volume queries run directly on the orders table with FINAL
+-- to ensure correct deduplication via ReplacingMergeTree.
+-- A SummingMergeTree MV was removed because it double-counts rows
+-- when the indexer re-processes overlapping transactions on restart.
 
 -- Create index for faster queries by block_time
 ALTER TABLE dln.orders ADD INDEX idx_block_time block_time TYPE minmax GRANULARITY 1;

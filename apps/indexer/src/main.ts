@@ -18,8 +18,7 @@ async function main(): Promise<void> {
   const srcIndexer = new Indexer(solana, redis, clickhouse, "OrderCreated");
   const dstIndexer = new Indexer(solana, redis, clickhouse, "OrderFulfilled");
   async function shutdown(code: number): Promise<void> {
-    srcIndexer.stop();
-    dstIndexer.stop();
+    await Promise.all([srcIndexer.stop(), dstIndexer.stop()]);
     await Promise.all([clickhouse.close(), redis.close()]);
     process.exit(code);
   }

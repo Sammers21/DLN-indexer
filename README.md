@@ -265,12 +265,13 @@ Using Anchor's `BorshCoder` and `EventParser` to deserialize events from transac
 - **Independent apps**: Indexer, API, and Dashboard can be developed/deployed independently
 - **Fast builds**: Turborepo caches and parallelizes builds
 
-## Assumptions
+## Assumptions & Known Limitations
 
-1. **Price Accuracy**: Uses spot price at indexing time, not historical prices at transaction time
-2. **Token Decimals**: Default to 6 decimals for unknown tokens (common for stablecoins)
-3. **Solana Chain ID**: `7565164` (0x736F6C = "sol")
-4. **RPC Rate Limits**: Built-in rate limiter (bottleneck) to respect RPC limits
+1. **Price Accuracy**: Uses Jupiter spot price at indexing time, not historical prices at transaction time. Jupiter Price API V3 does not provide historical price queries. To improve accuracy, a historical price oracle (e.g. Birdeye Historical Price API, Pyth historical feeds, or a self-maintained OHLCV database) would be needed. Prices are cached in Redis with a 10-minute TTL, so orders indexed within the same window share the same price.
+2. **Cross-chain Fulfilled Orders**: OrderFulfilled events where the take-side token is on an EVM chain (not Solana) are recorded with `pricing_status = 'error'` and `usd_value = null`. Supporting EVM token pricing would require integrating an EVM price oracle (e.g. CoinGecko, DefiLlama) and mapping EVM token addresses to price feeds.
+3. **Token Decimals**: Fetched from on-chain mint accounts, with hardcoded fallbacks for common tokens (SOL, USDC, USDT, BONK, JUP).
+4. **Solana Chain ID**: `7565164` (0x736F6C = "sol")
+5. **RPC Rate Limits**: Built-in rate limiter (bottleneck) to respect RPC limits
 
 ## Running Tests
 
@@ -303,10 +304,10 @@ bun run test
 
 ## Future Improvements
 
-- [ ] Historical price backfill for past orders
+- [ ] Historical price backfill using Birdeye or Pyth historical feeds
+- [ ] EVM token pricing for cross-chain fulfilled orders (CoinGecko / DefiLlama)
 - [ ] GraphQL API for flexible queries
 - [ ] Kubernetes deployment manifests
-- [ ] Prometheus metrics and Grafana dashboards
 - [ ] Order lifecycle tracking (created → fulfilled → unlocked)
 
 ## License
