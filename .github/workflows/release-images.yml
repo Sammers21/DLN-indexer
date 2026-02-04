@@ -1,95 +1,168 @@
-name: Release Images
+name: DLN Release & Deploy
 
 on:
   push:
     branches: [main]
-
-permissions:
-  contents: read
-  packages: write
-
-env:
-  REGISTRY: ghcr.io
-  IMAGE_OWNER: ${{ github.repository_owner }}
+  pull_request:
 
 jobs:
-  api:
-    if: ${{ contains(toJson(github.event.commits), 'release-api') }}
+  check-changes:
     runs-on: ubuntu-latest
+    outputs:
+      indexer: ${{ steps.check.outputs.indexer }}
+      api: ${{ steps.check.outputs.api }}
+      dashboard: ${{ steps.check.outputs.dashboard }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Check for changes or release flags
+        id: check
+        run: |
+          MSG="${{ github.event.head_commit.message }}"
+
+          # Check release flags
+          if echo "$MSG" | grep -q "release-indexer"; then
+            echo "indexer=true" >> $GITHUB_OUTPUT
+          else
+            echo "indexer=false" >> $GITHUB_OUTPUT
+          fi
+          if echo "$MSG" | grep -q "release-api"; then
+            echo "api=true" >> $GITHUB_OUTPUT
+          else
+            echo "api=false" >> $GITHUB_OUTPUT
+          fi
+          if echo "$MSG" | grep -q "release-dashboard"; then
+            echo "dashboard=true" >> $GITHUB_OUTPUT
+          else
+            echo "dashboard=false" >> $GITHUB_OUTPUT
+          fi
+
+          # Override with file-based detection for PRs
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            CHANGED_FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.sha }} 2>/dev/null || echo "")
+          else
+            CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
+          fi
+
+          if echo "$CHANGED_FILES" | grep -q "^apps/indexer/\|^packages/shared/"; then
+            echo "indexer=true" >> $GITHUB_OUTPUT
+          fi
+          if echo "$CHANGED_FILES" | grep -q "^apps/api/\|^packages/shared/"; then
+            echo "api=true" >> $GITHUB_OUTPUT
+          fi
+          if echo "$CHANGED_FILES" | grep -q "^apps/dashboard/"; then
+            echo "dashboard=true" >> $GITHUB_OUTPUT
+          fi
+
+  build:
+    needs: check-changes
+    if: needs.check-changes.outputs.indexer == 'true' || needs.check-changes.outputs.api == 'true' || needs.check-changes.outputs.dashboard == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: indexer
+            file: apps/indexer/Dockerfile
+            flag: indexer
+          - name: api
+            file: apps/api/Dockerfile
+            flag: api
+          - name: dashboard
+            file: apps/dashboard/Dockerfile
+            flag: dashboard
+    steps:
+      - uses: actions/checkout@v4
+        if: needs.check-changes.outputs[matrix.flag] == 'true'
 
       - name: Set up Docker Buildx
+        if: needs.check-changes.outputs[matrix.flag] == 'true'
         uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: network=host
+          config-inline: |
+            [registry."${{ secrets.DOCKER_REGISTRY }}"]
+              http = true
+              insecure = true
 
       - name: Log in to registry
+        if: needs.check-changes.outputs[matrix.flag] == 'true'
         uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          registry: ${{ secrets.DOCKER_REGISTRY }}
+          username: ${{ secrets.DOCKER_REGISTRY_USER }}
+          password: ${{ secrets.DOCKER_REGISTRY_PASSWORD }}
 
-      - name: Build and push API image
-        uses: docker/build-push-action@v5
+      - name: Build and push ${{ matrix.name }} image
+        if: needs.check-changes.outputs[matrix.flag] == 'true'
+        uses: docker/build-push-action@v6
         with:
           context: .
-          file: apps/api/Dockerfile
-          push: true
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/dln-api:latest
-            ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/dln-api:${{ github.sha }}
+          file: ${{ matrix.file }}
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          tags: ${{ secrets.DOCKER_REGISTRY }}/dln-${{ matrix.name }}:latest
+          cache-from: type=registry,ref=${{ secrets.DOCKER_REGISTRY }}/dln-${{ matrix.name }}:buildcache
+          cache-to: type=registry,ref=${{ secrets.DOCKER_REGISTRY }}/dln-${{ matrix.name }}:buildcache,mode=max
 
-  indexer:
-    if: ${{ contains(toJson(github.event.commits), 'release-indexer') }}
+  deploy-indexer:
+    needs: [check-changes, build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, 'release-indexer')
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to registry
-        uses: docker/login-action@v3
+      - name: Deploy indexer to production
+        uses: appleboy/ssh-action@master
         with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          host: ${{ secrets.APP_HOST }}
+          username: ${{ secrets.SSH_HOST_USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            docker pull ${{ secrets.DOCKER_REGISTRY }}/dln-indexer:latest
+            docker stop dln-indexer || true
+            docker rm -f dln-indexer || true
+            docker run --restart=always --name dln-indexer -d \
+              --env-file /opt/dln/.env \
+              -p 9090:9090 \
+              ${{ secrets.DOCKER_REGISTRY }}/dln-indexer:latest
+            docker image prune -f || true
 
-      - name: Build and push Indexer image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: apps/indexer/Dockerfile
-          push: true
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/dln-indexer:latest
-            ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/dln-indexer:${{ github.sha }}
-
-  dashboard:
-    if: ${{ contains(toJson(github.event.commits), 'release-dashboard') }}
+  deploy-api:
+    needs: [check-changes, build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, 'release-api')
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to registry
-        uses: docker/login-action@v3
+      - name: Deploy API to production
+        uses: appleboy/ssh-action@master
         with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          host: ${{ secrets.APP_HOST }}
+          username: ${{ secrets.SSH_HOST_USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            docker pull ${{ secrets.DOCKER_REGISTRY }}/dln-api:latest
+            docker stop dln-api || true
+            docker rm -f dln-api || true
+            docker run --restart=always --name dln-api -d \
+              --env-file /opt/dln/.env \
+              -p 3000:3000 \
+              ${{ secrets.DOCKER_REGISTRY }}/dln-api:latest
+            docker image prune -f || true
 
-      - name: Build and push Dashboard image
-        uses: docker/build-push-action@v5
+  deploy-dashboard:
+    needs: [check-changes, build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, 'release-dashboard')
+    runs-on: self-hosted
+    steps:
+      - name: Deploy dashboard to production
+        uses: appleboy/ssh-action@master
         with:
-          context: .
-          file: apps/dashboard/Dockerfile
-          push: true
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/dln-dashboard:latest
-            ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/dln-dashboard:${{ github.sha }}
+          host: ${{ secrets.APP_HOST }}
+          username: ${{ secrets.SSH_HOST_USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            docker pull ${{ secrets.DOCKER_REGISTRY }}/dln-dashboard:latest
+            docker stop dln-dashboard || true
+            docker rm -f dln-dashboard || true
+            docker run --restart=always --name dln-dashboard -d \
+              -p 8080:80 \
+              ${{ secrets.DOCKER_REGISTRY }}/dln-dashboard:latest
+            docker image prune -f || true

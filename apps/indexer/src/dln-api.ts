@@ -1,6 +1,7 @@
 import { createLogger, type PricingStatus } from "@dln/shared";
 import Bottleneck from "bottleneck";
 import { getTokenPrice, getTokenDecimals, calculateUsdValue } from "./price";
+import { apiRequests } from "./metrics";
 
 const logger = createLogger("dln-api");
 
@@ -59,6 +60,7 @@ export async function getUsdValueFromDlnApi(
     try {
       const response = await limiter.schedule(() => fetch(url));
       if (response.ok) {
+        apiRequests.inc({ dest: "dln", endpoint: "orders", status: "success" });
         const data = (await response.json()) as DlnOrderLiteModel;
         // Verify order is on Solana
         if (data.takeOffer.chainId.bigIntegerValue !== SOLANA_CHAIN_ID) {
@@ -102,6 +104,7 @@ export async function getUsdValueFromDlnApi(
         return okResult(usdValue);
       }
       if (response.status === 404) {
+        apiRequests.inc({ dest: "dln", endpoint: "orders", status: "not_found" });
         logger.error(
           { orderId: orderId.slice(0, 16) },
           "Order not found in DLN API",
@@ -109,6 +112,7 @@ export async function getUsdValueFromDlnApi(
         return errorResult("order_not_found");
       }
       if (response.status === 429 && attempt < MAX_RETRIES) {
+        apiRequests.inc({ dest: "dln", endpoint: "orders", status: "rate_limited" });
         logger.warn(
           { orderId: orderId.slice(0, 16), attempt, delayMs },
           "DLN API rate limited, retrying...",
@@ -117,6 +121,7 @@ export async function getUsdValueFromDlnApi(
         delayMs = Math.min(delayMs * 2, 30000);
         continue;
       }
+      apiRequests.inc({ dest: "dln", endpoint: "orders", status: "error" });
       logger.warn(
         { status: response.status, orderId: orderId.slice(0, 16) },
         "DLN API error",
@@ -124,6 +129,7 @@ export async function getUsdValueFromDlnApi(
       return errorResult(`api_status_${response.status}`);
     } catch (err) {
       if (attempt < MAX_RETRIES) {
+        apiRequests.inc({ dest: "dln", endpoint: "orders", status: "error" });
         logger.warn(
           { err, orderId: orderId.slice(0, 16), attempt },
           "DLN API request failed, retrying...",
@@ -132,6 +138,7 @@ export async function getUsdValueFromDlnApi(
         delayMs = Math.min(delayMs * 2, 30000);
         continue;
       }
+      apiRequests.inc({ dest: "dln", endpoint: "orders", status: "error" });
       logger.error(
         { err, orderId: orderId.slice(0, 16) },
         "Failed to fetch from DLN API",

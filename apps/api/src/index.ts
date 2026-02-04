@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { config, createLogger, Clickhouse } from "@dln/shared";
 import type { OrderEventType } from "@dln/shared";
+import { registry, httpRequestDuration, httpRequestsTotal } from "./metrics";
 
 const logger = createLogger("api");
 
@@ -11,6 +12,28 @@ const volumeKinds: Record<string, OrderEventType> = {
 
 export function createApp(clickhouse: Clickhouse): Hono {
   const app = new Hono();
+
+  // Metrics middleware
+  app.use("*", async (c, next) => {
+    const start = performance.now();
+    await next();
+    const duration = (performance.now() - start) / 1000;
+    const route = c.req.routePath ?? c.req.path;
+    const method = c.req.method;
+    const statusCode = String(c.res.status);
+    httpRequestDuration.observe(
+      { method, route, status_code: statusCode },
+      duration,
+    );
+    httpRequestsTotal.inc({ method, route, status_code: statusCode });
+  });
+
+  app.get("/metrics", async (c) => {
+    const metrics = await registry.metrics();
+    return c.text(metrics, 200, {
+      "Content-Type": registry.contentType,
+    });
+  });
 
   app.get("/api/default_range", async (c) => {
     const range = await clickhouse.getDefaultRange();

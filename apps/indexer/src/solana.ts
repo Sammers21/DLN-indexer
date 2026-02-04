@@ -6,6 +6,7 @@ import {
 } from "@solana/web3.js";
 import Bottleneck from "bottleneck";
 import { config, createLogger } from "@dln/shared";
+import { apiRequests } from "./metrics";
 
 const logger = createLogger("solana");
 
@@ -67,6 +68,7 @@ export class SolanaClient {
           const result = await fn();
           const timeMs = Date.now() - start;
           this.recordMetrics(name, timeMs, false);
+          apiRequests.inc({ dest: "solana", endpoint: name, status: "success" });
           return { result, timeMs };
         } catch (err) {
           lastError = err as Error;
@@ -100,6 +102,7 @@ export class SolanaClient {
         }
       }
       this.recordMetrics(name, null, true);
+      apiRequests.inc({ dest: "solana", endpoint: name, status: "error" });
       throw lastError ?? new Error("RPC call failed without an error payload");
     });
   }

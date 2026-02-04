@@ -1,8 +1,10 @@
+import http from "node:http";
 import { config, createLogger, Clickhouse } from "@dln/shared";
 import { Indexer } from "./indexer";
 import { SolanaClient } from "./solana";
 import { Redis } from "./storage";
 import { setPriceCache } from "./price";
+import { registry } from "./metrics";
 
 const logger = createLogger("indexer");
 
@@ -23,6 +25,20 @@ async function main(): Promise<void> {
   }
   process.on("SIGINT", () => shutdown(0));
   process.on("SIGTERM", () => shutdown(0));
+  // Expose Prometheus metrics on port 9090
+  const metricsPort = Number(process.env.METRICS_PORT ?? 9090);
+  const metricsServer = http.createServer(async (_req, res) => {
+    if (_req.url === "/metrics") {
+      const metrics = await registry.metrics();
+      res.writeHead(200, { "Content-Type": registry.contentType });
+      res.end(metrics);
+    } else {
+      res.writeHead(404);
+      res.end("Not Found");
+    }
+  });
+  metricsServer.listen(metricsPort);
+  logger.info({ port: metricsPort }, "Indexer metrics server started");
   try {
     const srcIndexing = srcIndexer.startIndexing();
     const dstIndexing = dstIndexer.startIndexing();
