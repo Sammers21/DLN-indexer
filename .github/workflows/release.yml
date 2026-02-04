@@ -162,6 +162,7 @@ jobs:
           username: ${{ secrets.SSH_HOST_USERNAME }}
           key: ${{ secrets.SSH_KEY }}
           script: |
+            echo "${{ secrets.DOCKER_REGISTRY_PASSWORD }}" | docker login ${{ secrets.DOCKER_REGISTRY }} -u ${{ secrets.DOCKER_REGISTRY_USER }} --password-stdin
             docker pull ${{ secrets.DOCKER_REGISTRY }}/dln-indexer:latest
             docker stop dln-indexer || true
             docker rm -f dln-indexer || true
@@ -183,6 +184,7 @@ jobs:
           username: ${{ secrets.SSH_HOST_USERNAME }}
           key: ${{ secrets.SSH_KEY }}
           script: |
+            echo "${{ secrets.DOCKER_REGISTRY_PASSWORD }}" | docker login ${{ secrets.DOCKER_REGISTRY }} -u ${{ secrets.DOCKER_REGISTRY_USER }} --password-stdin
             docker pull ${{ secrets.DOCKER_REGISTRY }}/dln-api:latest
             docker stop dln-api || true
             docker rm -f dln-api || true
@@ -204,6 +206,7 @@ jobs:
           username: ${{ secrets.SSH_HOST_USERNAME }}
           key: ${{ secrets.SSH_KEY }}
           script: |
+            echo "${{ secrets.DOCKER_REGISTRY_PASSWORD }}" | docker login ${{ secrets.DOCKER_REGISTRY }} -u ${{ secrets.DOCKER_REGISTRY_USER }} --password-stdin
             docker pull ${{ secrets.DOCKER_REGISTRY }}/dln-dashboard:latest
             docker stop dln-dashboard || true
             docker rm -f dln-dashboard || true
