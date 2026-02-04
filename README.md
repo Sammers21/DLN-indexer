@@ -111,10 +111,9 @@ bun format:check     # Check code formatting
             ▼                                           ▼
 ┌─────────────────────────┐                 ┌─────────────────────────────────┐
 │         REDIS           │                 │          CLICKHOUSE             │
-│  db0: Checkpoints       │                 │  ReplacingMergeTree tables:     │
-│  db1: Price cache (TTL) │                 │  - created_orders               │
-└─────────────────────────┘                 │  - fulfilled_orders             │
-                                            └─────────────────────────────────┘
+│  db0: Checkpoints       │                 │  dln.orders table               │
+│  db1: Price cache (TTL) │                 │  (event_type: created/fulfilled)│
+└─────────────────────────┘                 └─────────────────────────────────┘
                                                           │
                                                           ▼
                                             ┌─────────────────────────────────┐
