@@ -86,7 +86,7 @@ bun format:check     # Check code formatting
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                              SOLANA BLOCKCHAIN                               │
+│                              SOLANA BLOCKCHAIN                              │
 │  ┌─────────────────────────────────┐  ┌─────────────────────────────────┐   │
 │  │         DlnSource Program       │  │      DlnDestination Program     │   │
 │  │  src5qyZHqTqec...MPHr4          │  │  dst5MGcFPoBeR...SAbsLbNo       │   │
@@ -97,23 +97,23 @@ bun format:check     # Check code formatting
                                │ getTransactions (batched)
                                ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                                 INDEXER                                      │
+│                                 INDEXER                                     │
 │  ┌────────────────┐  ┌────────────────┐  ┌────────────────────────────────┐ │
 │  │  Solana RPC    │  │    Parser      │  │        Price Enrichment        │ │
-│  │  (rate-limited)│→ │ (Low-level     │→ │  Jupiter API + DLN API         │ │
+│  │  (rate-limited)│→ │ (Own low-level │→ │  Jupiter API + DLN API         │ │
 │  │                │  │  Borsh parser) │  │                                │ │
 │  └────────────────┘  └────────────────┘  └────────────────────────────────┘ │
-│           │                                           │                      │
-│           │              BIDIRECTIONAL                │                      │
-│           │         ←── INDEXING ──→                  │                      │
-│           │         (forward + backward)              │                      │
-└───────────┼───────────────────────────────────────────┼──────────────────────┘
+│           │                                           │                     │
+│           │              BIDIRECTIONAL                │                     │
+│           │         ←── INDEXING ──→                  │                     │
+│           │         (forward + backward)              │                     │
+└───────────┼───────────────────────────────────────────┼─────────────────────┘
             │                                           │
             ▼                                           ▼
 ┌─────────────────────────┐                 ┌─────────────────────────────────┐
 │         REDIS           │                 │          CLICKHOUSE             │
 │  db0: Checkpoints       │                 │  dln.orders table               │
-│  db1: Price cache (TTL) │                 │  (event_type: created/fulfilled)│
+│  db1: Price cache (TTL) │                 │  event_type: created/fulfilled  │
 └─────────────────────────┘                 └─────────────────────────────────┘
                                                           │
                                                           ▼
@@ -163,15 +163,15 @@ The indexer uses a **bidirectional expansion** approach to efficiently index bot
                   [from ← → to]
                        │
     ┌──────────────────┴──────────────────┐
-    │                                      │
-    ▼                                      ▼
+    │                                     │
+    ▼                                     ▼
 BACKWARD                              FORWARD
 (historical)                          (new txs)
-    │                                      │
+    │                                     │
     │  Lower priority                      │  Higher priority
     │  Backfills during                    │  Processes immediately
     │  idle periods                        │  to stay up-to-date
-    ▼                                      ▼
+    ▼                                     ▼
 ```
 
 - **Forward expansion**: Prioritized to keep the index up-to-date with new transactions
