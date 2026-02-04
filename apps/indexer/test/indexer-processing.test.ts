@@ -27,9 +27,7 @@ function makeSigInfo(
   } as ConfirmedSignatureInfo;
 }
 
-function createMockStore(
-  existing?: Checkpoint,
-): CheckpointStore & {
+function createMockStore(existing?: Checkpoint): CheckpointStore & {
   saved: Array<{ program: ProgramType; checkpoint: Checkpoint }>;
 } {
   const saved: Array<{ program: ProgramType; checkpoint: Checkpoint }> = [];
@@ -68,12 +66,7 @@ describe("Indexer processing", () => {
         getTransaction: async () => null,
       } as unknown as SolanaClient;
 
-      const indexer = new Indexer(
-        mockSolana,
-        store,
-        analytics,
-        "OrderCreated",
-      );
+      const indexer = new Indexer(mockSolana, store, analytics, "OrderCreated");
       const internal = indexer as unknown as {
         handleSignature: (
           sig: ConfirmedSignatureInfo,
@@ -102,12 +95,7 @@ describe("Indexer processing", () => {
         }),
       } as unknown as SolanaClient;
 
-      const indexer = new Indexer(
-        mockSolana,
-        store,
-        analytics,
-        "OrderCreated",
-      );
+      const indexer = new Indexer(mockSolana, store, analytics, "OrderCreated");
       const internal = indexer as unknown as {
         handleSignature: (
           sig: ConfirmedSignatureInfo,
@@ -131,12 +119,7 @@ describe("Indexer processing", () => {
         }),
       } as unknown as SolanaClient;
 
-      const indexer = new Indexer(
-        mockSolana,
-        store,
-        analytics,
-        "OrderCreated",
-      );
+      const indexer = new Indexer(mockSolana, store, analytics, "OrderCreated");
       const internal = indexer as unknown as {
         handleSignature: (
           sig: ConfirmedSignatureInfo,
@@ -166,12 +149,7 @@ describe("Indexer processing", () => {
         }),
       } as unknown as SolanaClient;
 
-      const indexer = new Indexer(
-        mockSolana,
-        store,
-        analytics,
-        "OrderCreated",
-      );
+      const indexer = new Indexer(mockSolana, store, analytics, "OrderCreated");
       const internal = indexer as unknown as {
         handleSignature: (
           sig: ConfirmedSignatureInfo,
@@ -249,12 +227,7 @@ describe("Indexer processing", () => {
         getSignaturesForAddress: async () => sigs,
       } as unknown as SolanaClient;
 
-      const indexer = new Indexer(
-        mockSolana,
-        store,
-        analytics,
-        "OrderCreated",
-      );
+      const indexer = new Indexer(mockSolana, store, analytics, "OrderCreated");
       const internal = indexer as unknown as {
         getForwardSignatures: () => Promise<ConfirmedSignatureInfo[]>;
       };
@@ -277,12 +250,7 @@ describe("Indexer processing", () => {
         ],
       } as unknown as SolanaClient;
 
-      const indexer = new Indexer(
-        mockSolana,
-        store,
-        analytics,
-        "OrderCreated",
-      );
+      const indexer = new Indexer(mockSolana, store, analytics, "OrderCreated");
       // Set checkpoint manually
       const internal = indexer as unknown as {
         checkpoint: Checkpoint | null;
@@ -309,12 +277,7 @@ describe("Indexer processing", () => {
         ],
       } as unknown as SolanaClient;
 
-      const indexer = new Indexer(
-        mockSolana,
-        store,
-        analytics,
-        "OrderCreated",
-      );
+      const indexer = new Indexer(mockSolana, store, analytics, "OrderCreated");
       const internal = indexer as unknown as {
         checkpoint: Checkpoint | null;
         getForwardSignatures: () => Promise<ConfirmedSignatureInfo[]>;
@@ -335,12 +298,7 @@ describe("Indexer processing", () => {
         getSignaturesForAddress: async () => [],
       } as unknown as SolanaClient;
 
-      const indexer = new Indexer(
-        mockSolana,
-        store,
-        analytics,
-        "OrderCreated",
-      );
+      const indexer = new Indexer(mockSolana, store, analytics, "OrderCreated");
       const internal = indexer as unknown as {
         checkpoint: Checkpoint | null;
         getForwardSignatures: () => Promise<ConfirmedSignatureInfo[]>;
@@ -431,12 +389,7 @@ describe("Indexer processing", () => {
         },
       } as unknown as SolanaClient;
 
-      const indexer = new Indexer(
-        mockSolana,
-        store,
-        analytics,
-        "OrderCreated",
-      );
+      const indexer = new Indexer(mockSolana, store, analytics, "OrderCreated");
 
       // Run startIndexing but stop after first iteration
       const internal = indexer as unknown as {
@@ -473,12 +426,7 @@ describe("Indexer processing", () => {
         },
       } as unknown as SolanaClient;
 
-      const indexer = new Indexer(
-        mockSolana,
-        store,
-        analytics,
-        "OrderCreated",
-      );
+      const indexer = new Indexer(mockSolana, store, analytics, "OrderCreated");
 
       const internal = indexer as unknown as {
         sleep: (ms: number) => Promise<void>;

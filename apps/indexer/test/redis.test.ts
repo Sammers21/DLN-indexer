@@ -110,10 +110,7 @@ describe("Redis store", () => {
         tokenKey: string,
         decimals: number,
       ): Promise<void> {
-        await mockPriceClient.set(
-          `decimals:${tokenKey}`,
-          decimals.toString(),
-        );
+        await mockPriceClient.set(`decimals:${tokenKey}`, decimals.toString());
       },
     };
   }

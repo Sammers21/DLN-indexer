@@ -70,7 +70,8 @@ describe("SolanaClient", () => {
       expect(callCount).to.equal(2);
     });
 
-    it("throws after max retries exhausted", async () => {
+    it("throws after max retries exhausted", async function () {
+      this.timeout(35000); // Allow for exponential backoff delays
       const internal = client as unknown as {
         withRetry: <T>(
           name: string,
@@ -106,7 +107,9 @@ describe("SolanaClient", () => {
 
       expect(internal.metrics.getTransaction.count).to.equal(1);
       expect(internal.metrics.getTransaction.errorCount).to.equal(0);
-      expect(internal.metrics.getTransaction.totalMs).to.be.greaterThanOrEqual(0);
+      expect(internal.metrics.getTransaction.totalMs).to.be.greaterThanOrEqual(
+        0,
+      );
     });
   });
 
@@ -227,9 +230,11 @@ describe("SolanaClient", () => {
           timeMs: number | null,
           failed: boolean,
         ) => void;
-        buildMetricsSnapshot: (
-          method: string,
-        ) => { count: number; errorCount: number; avgMs: number };
+        buildMetricsSnapshot: (method: string) => {
+          count: number;
+          errorCount: number;
+          avgMs: number;
+        };
       };
 
       internal.recordMetrics("getTransaction", 100, false);
@@ -243,14 +248,14 @@ describe("SolanaClient", () => {
 
     it("returns 0 avgMs when count is 0", () => {
       const internal = client as unknown as {
-        buildMetricsSnapshot: (
-          method: string,
-        ) => { count: number; errorCount: number; avgMs: number };
+        buildMetricsSnapshot: (method: string) => {
+          count: number;
+          errorCount: number;
+          avgMs: number;
+        };
       };
 
-      const snapshot = internal.buildMetricsSnapshot(
-        "getSignaturesForAddress",
-      );
+      const snapshot = internal.buildMetricsSnapshot("getSignaturesForAddress");
       expect(snapshot.avgMs).to.equal(0);
     });
   });

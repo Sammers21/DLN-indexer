@@ -1,6 +1,9 @@
 import { describe, it, beforeEach, afterEach } from "mocha";
 import { expect } from "chai";
 
+// Set Jupiter API key before any imports to avoid 'API key not configured' warning
+process.env.JUPITER_API_KEY = "test-api-key";
+
 const originalFetch = globalThis.fetch;
 
 describe("getTokenPrice", () => {
@@ -8,6 +11,7 @@ describe("getTokenPrice", () => {
   let setPriceCache: (redis: unknown) => void;
 
   beforeEach(async () => {
+    // Re-import to get fresh module with API key set
     const mod = await import("../src/price.js");
     getTokenPrice = mod.getTokenPrice;
     setPriceCache = mod.setPriceCache;
@@ -20,27 +24,29 @@ describe("getTokenPrice", () => {
   it("returns price from Jupiter API on success", async () => {
     const mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
     globalThis.fetch = async () =>
-      new Response(
-        JSON.stringify({ [mint]: { usdPrice: 1.0001 } }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      );
+      new Response(JSON.stringify({ [mint]: { usdPrice: 1.0001 } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
     const price = await getTokenPrice(mint);
     expect(price).to.equal(1.0001);
   });
 
   it("returns null when Jupiter returns non-ok status", async () => {
     globalThis.fetch = async () => new Response("Error", { status: 500 });
-    const price = await getTokenPrice("SomeMint111111111111111111111111111111111");
+    const price = await getTokenPrice(
+      "SomeMint111111111111111111111111111111111",
+    );
     expect(price).to.equal(null);
   });
 
   it("returns null when Jupiter returns no data for mint", async () => {
     const mint = "UnknownMint1111111111111111111111111111111";
     globalThis.fetch = async () =>
-      new Response(
-        JSON.stringify({}),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      );
+      new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
     const price = await getTokenPrice(mint);
     expect(price).to.equal(null);
   });
@@ -53,10 +59,10 @@ describe("getTokenPrice", () => {
       if (callCount === 1) {
         return new Response("Too Many Requests", { status: 429 });
       }
-      return new Response(
-        JSON.stringify({ [mint]: { usdPrice: 150.5 } }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      );
+      return new Response(JSON.stringify({ [mint]: { usdPrice: 150.5 } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
     };
     const price = await getTokenPrice(mint);
     expect(price).to.equal(150.5);
@@ -67,7 +73,9 @@ describe("getTokenPrice", () => {
     globalThis.fetch = async () => {
       throw new Error("Network failure");
     };
-    const price = await getTokenPrice("SomeMint111111111111111111111111111111111");
+    const price = await getTokenPrice(
+      "SomeMint111111111111111111111111111111111",
+    );
     expect(price).to.equal(null);
   });
 
@@ -78,9 +86,9 @@ describe("getTokenPrice", () => {
         if (key === `solana:${mint}`) return 99.99;
         return null;
       },
-      setCachedPrice: async () => {},
+      setCachedPrice: async () => { },
       getCachedDecimals: async () => null,
-      setCachedDecimals: async () => {},
+      setCachedDecimals: async () => { },
     };
     setPriceCache(mockRedis as never);
     // fetch should not be called
@@ -107,14 +115,14 @@ describe("getTokenPrice", () => {
         cachedPrice = price;
       },
       getCachedDecimals: async () => null,
-      setCachedDecimals: async () => {},
+      setCachedDecimals: async () => { },
     };
     setPriceCache(mockRedis as never);
     globalThis.fetch = async () =>
-      new Response(
-        JSON.stringify({ [mint]: { usdPrice: 200.5 } }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      );
+      new Response(JSON.stringify({ [mint]: { usdPrice: 200.5 } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
     const price = await getTokenPrice(mint);
     expect(price).to.equal(200.5);
     expect(cachedKey).to.equal(`solana:${mint}`);
@@ -165,12 +173,12 @@ describe("getTokenDecimals", () => {
     const mint = "CustomMint11111111111111111111111111111111";
     const mockRedis = {
       getCachedPrice: async () => null,
-      setCachedPrice: async () => {},
+      setCachedPrice: async () => { },
       getCachedDecimals: async (key: string) => {
         if (key === `solana:${mint}`) return 8;
         return null;
       },
-      setCachedDecimals: async () => {},
+      setCachedDecimals: async () => { },
     };
     setPriceCache(mockRedis as never);
     const decimals = await getTokenDecimals(mint);
@@ -225,9 +233,9 @@ describe("setPriceCache", () => {
     const mod = await import("../src/price.js");
     const mockRedis = {
       getCachedPrice: async () => null,
-      setCachedPrice: async () => {},
+      setCachedPrice: async () => { },
       getCachedDecimals: async () => null,
-      setCachedDecimals: async () => {},
+      setCachedDecimals: async () => { },
     };
     // Should not throw
     mod.setPriceCache(mockRedis as never);

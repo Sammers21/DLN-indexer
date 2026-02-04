@@ -1,6 +1,9 @@
 import { describe, it, afterEach } from "mocha";
 import { expect } from "chai";
 
+// Set Jupiter API key before any imports to avoid 'API key not configured' warning
+process.env.JUPITER_API_KEY = "test-api-key";
+
 const originalFetch = globalThis.fetch;
 
 describe("DLN API pricing flow", () => {
@@ -67,8 +70,7 @@ describe("DLN API pricing flow", () => {
           takeOffer: {
             chainId: { bigIntegerValue: 7565164 },
             tokenAddress: {
-              stringValue:
-                "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+              stringValue: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
             },
             amount: { stringValue: "1000000" },
           },
