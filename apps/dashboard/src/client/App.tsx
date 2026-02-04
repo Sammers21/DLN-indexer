@@ -7,17 +7,18 @@ import {
   ResponsiveContainer,
   BarChart,
   Bar,
-  TooltipProps,
 } from "recharts";
-import {
-  ValueType,
-  NameType,
-} from "recharts/types/component/DefaultTooltipContent";
 
 interface VolumeRow {
   period: string;
   order_count: number;
   volume_usd: number;
+}
+
+interface CustomTooltipProps {
+  active?: boolean;
+  payload?: Array<{ payload: VolumeRow }>;
+  label?: string;
 }
 
 function formatUsd(value: number): string {
@@ -26,13 +27,9 @@ function formatUsd(value: number): string {
   return `$${value.toFixed(2)}`;
 }
 
-function CustomTooltip({
-  active,
-  payload,
-  label,
-}: TooltipProps<ValueType, NameType>) {
+function CustomTooltip({ active, payload, label }: CustomTooltipProps) {
   if (!active || !payload || payload.length === 0) return null;
-  const data = payload[0].payload as VolumeRow;
+  const data = payload[0].payload;
   return (
     <div
       style={{
