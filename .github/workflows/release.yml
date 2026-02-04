@@ -56,6 +56,7 @@ jobs:
           fi
 
   build:
+    name: build-${{ matrix.name }}
     needs: check-changes
     if: needs.check-changes.outputs.indexer == 'true' || needs.check-changes.outputs.api == 'true' || needs.check-changes.outputs.dashboard == 'true'
     runs-on: ubuntu-latest
