@@ -3,16 +3,7 @@ import {
   ConfirmedSignatureInfo,
   VersionedTransactionResponse,
 } from "@solana/web3.js";
-import { BorshCoder, EventParser } from "@coral-xyz/anchor";
-import {
-  config,
-  createLogger,
-  DLN_SRC_IDL,
-  DLN_DST_IDL,
-  Analytics,
-  Order,
-  OrderKind,
-} from "@dln/shared";
+import { config, createLogger, Analytics, Order, OrderKind } from "@dln/shared";
 import {
   Checkpoint,
   CheckpointBoundary,
@@ -22,7 +13,12 @@ import {
 import { SolanaClient } from "./solana";
 import { getUsdValue } from "./price.js";
 import { getUsdValueFromDlnApi } from "./dln-api.js";
-import { extractCreatedOrderId, extractFulfilledOrderId } from "./parser";
+import {
+  extractCreatedOrderData,
+  extractCreatedOrderId,
+  extractFulfilledOrderId,
+  parseProgramEvents,
+} from "./parser";
 
 const logger = createLogger("indexer");
 
@@ -41,41 +37,8 @@ function formatTime(timestamp: number): string {
   });
 }
 
-// Offer struct from DLN
-interface Offer {
-  chainId: number[];
-  tokenAddress: number[];
-  amount: number[];
-}
-
-// Order struct from CreatedOrder event
-interface DlnOrder {
-  makerOrderNonce: bigint;
-  makerSrc: number[];
-  give: Offer;
-  take: Offer;
-  receiverDst: number[];
-  givePatchAuthoritySrc: number[];
-  orderAuthorityAddressDst: number[];
-  allowedTakerDst: number[] | null;
-  allowedCancelBeneficiarySrc: number[] | null;
-  externalCall: { externalCallShortcut: number[] } | null;
-}
-
-// CreatedOrder event data
-interface CreatedOrderData {
-  order: DlnOrder;
-  fixFee: bigint;
-  percentFee: bigint;
-}
-
 const DLN_SRC = new PublicKey(config.dln.srcProgramId);
 const DLN_DST = new PublicKey(config.dln.dstProgramId);
-
-const srcCoder = new BorshCoder(DLN_SRC_IDL);
-const dstCoder = new BorshCoder(DLN_DST_IDL);
-const srcEventParser = new EventParser(DLN_SRC, srcCoder);
-const dstEventParser = new EventParser(DLN_DST, dstCoder);
 
 const INSERT_BATCH_SIZE = 100;
 const INSERT_FLUSH_INTERVAL_MS = 5000;
@@ -87,7 +50,6 @@ export class Indexer {
   private readonly kind: OrderKind;
   private readonly programId: PublicKey;
   private readonly programType: ProgramType;
-  private readonly eventParser: EventParser;
   private checkpoint: Checkpoint | null = null;
   private lastCheckpointSaveTime = 0;
   private running = false;
@@ -105,8 +67,6 @@ export class Indexer {
     this.kind = kind;
     this.programId = kind === "OrderCreated" ? DLN_SRC : DLN_DST;
     this.programType = kind === "OrderCreated" ? "src" : "dst";
-    this.eventParser =
-      kind === "OrderCreated" ? srcEventParser : dstEventParser;
   }
   getCheckpoint(): Checkpoint | null {
     return this.checkpoint;
@@ -271,8 +231,10 @@ export class Indexer {
     if (!tx.meta?.logMessages) return null;
     const txBlockTime = sigInfo.blockTime ?? Math.floor(Date.now() / 1000);
     try {
-      const events = this.eventParser.parseLogs(tx.meta.logMessages);
-      const eventsList = Array.from(events);
+      const eventsList = parseProgramEvents(
+        tx.meta.logMessages,
+        this.programId.toString(),
+      );
       if (this.kind === "OrderCreated") {
         return await this.processOrderCreated(eventsList, sigInfo, txBlockTime);
       } else {
@@ -295,12 +257,7 @@ export class Indexer {
     sigInfo: ConfirmedSignatureInfo,
     txBlockTime: number,
   ): Promise<Order | null> {
-    let createdOrderData: CreatedOrderData | null = null;
-    for (const event of eventsList) {
-      if (event.name === "CreatedOrder") {
-        createdOrderData = event.data as unknown as CreatedOrderData;
-      }
-    }
+    const createdOrderData = extractCreatedOrderData(eventsList);
     const orderId = extractCreatedOrderId(eventsList);
     if (!createdOrderData || !orderId) return null;
     // Calculate USD value

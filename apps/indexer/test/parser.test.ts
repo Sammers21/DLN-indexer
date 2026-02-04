@@ -1,15 +1,63 @@
 import { describe, it } from "mocha";
 import { expect } from "chai";
-import {
-  BorshCoder,
-  BorshEventCoder,
-  EventParser,
-  eventDiscriminator,
-} from "@coral-xyz/anchor";
+import { createHash } from "node:crypto";
 import { PublicKey } from "@solana/web3.js";
-import { config, DLN_DST_IDL, DLN_SRC_IDL } from "@dln/shared";
-import BN from "bn.js";
-import { extractCreatedOrderId, extractFulfilledOrderId } from "../src/parser";
+import { config } from "@dln/shared";
+import {
+  extractCreatedOrderData,
+  extractCreatedOrderId,
+  extractFulfilledOrderId,
+  parseProgramEvents,
+} from "../src/parser";
+import type { CreatedOrderData } from "../src/parser";
+
+class BorshWriter {
+  private readonly chunks: Buffer[] = [];
+
+  writeU8(value: number): void {
+    const buffer = Buffer.alloc(1);
+    buffer.writeUInt8(value, 0);
+    this.chunks.push(buffer);
+  }
+
+  writeU32(value: number): void {
+    const buffer = Buffer.alloc(4);
+    buffer.writeUInt32LE(value, 0);
+    this.chunks.push(buffer);
+  }
+
+  writeU64(value: bigint): void {
+    const buffer = Buffer.alloc(8);
+    buffer.writeBigUInt64LE(value, 0);
+    this.chunks.push(buffer);
+  }
+
+  writeFixedBytes(bytes: number[]): void {
+    this.chunks.push(Buffer.from(bytes));
+  }
+
+  writeBytes(bytes: number[]): void {
+    this.writeU32(bytes.length);
+    this.writeFixedBytes(bytes);
+  }
+
+  writeOption<T>(value: T | null, writeValue: (innerValue: T) => void): void {
+    if (value === null) {
+      this.writeU8(0);
+      return;
+    }
+    this.writeU8(1);
+    writeValue(value);
+  }
+
+  toBuffer(): Buffer {
+    return Buffer.concat(this.chunks);
+  }
+}
+
+function eventDiscriminator(name: string): Buffer {
+  return createHash("sha256").update(`event:${name}`).digest().subarray(0, 8);
+}
 
 function buildProgramLogs(programId: PublicKey, base64Event: string): string[] {
   return [
@@ -19,96 +67,93 @@ function buildProgramLogs(programId: PublicKey, base64Event: string): string[] {
   ];
 }
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  if (typeof value !== "object" || value === null) return false;
-  const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null;
+function encodeEvent(eventName: string, payload: Buffer): string {
+  return Buffer.concat([eventDiscriminator(eventName), payload]).toString(
+    "base64",
+  );
 }
 
-function normalizeBorshInput(value: unknown): unknown {
-  if (value === null || value === undefined) return value;
-  if (Buffer.isBuffer(value)) return value;
-  if (value instanceof Uint8Array) return Buffer.from(value);
-  if (value instanceof PublicKey) return value;
-  if (value instanceof BN) return value;
-  if (Array.isArray(value)) {
-    if (value.every((item) => typeof item === "number"))
-      return Buffer.from(value);
-    return value.map((item) => normalizeBorshInput(item));
-  }
-  if (isPlainObject(value)) {
-    const normalized: Record<string, unknown> = {};
-    for (const [key, nested] of Object.entries(value)) {
-      normalized[key] = normalizeBorshInput(nested);
-    }
-    return normalized;
-  }
-  return value;
+function encodeOffer(
+  writer: BorshWriter,
+  offer: CreatedOrderData["order"]["give"],
+): void {
+  writer.writeFixedBytes(offer.chainId);
+  writer.writeBytes(offer.tokenAddress);
+  writer.writeFixedBytes(offer.amount);
 }
 
-function encodeEvent(
-  idl: unknown,
-  eventName: string,
-  data: Record<string, unknown>,
-): string {
-  const eventCoder = new BorshEventCoder(idl as never);
-  const layouts = (
-    eventCoder as unknown as {
-      layouts: Map<
-        string,
-        { encode: (src: unknown, buffer: Buffer, offset?: number) => number }
-      >;
-    }
-  ).layouts;
-  const layout = layouts.get(eventName);
-  if (!layout) throw new Error(`Missing layout for event ${eventName}`);
-  const buffer = Buffer.alloc(2048);
-  const span = layout.encode(normalizeBorshInput(data), buffer);
-  const discriminator = eventDiscriminator(eventName);
-  return Buffer.concat([
-    Buffer.from(discriminator),
-    buffer.slice(0, span),
-  ]).toString("base64");
+function encodeCreatedOrderPayload(data: CreatedOrderData): Buffer {
+  const writer = new BorshWriter();
+  writer.writeU64(data.order.makerOrderNonce);
+  writer.writeBytes(data.order.makerSrc);
+  encodeOffer(writer, data.order.give);
+  encodeOffer(writer, data.order.take);
+  writer.writeBytes(data.order.receiverDst);
+  writer.writeBytes(data.order.givePatchAuthoritySrc);
+  writer.writeBytes(data.order.orderAuthorityAddressDst);
+  writer.writeOption(data.order.allowedTakerDst, (value) =>
+    writer.writeBytes(value),
+  );
+  writer.writeOption(data.order.allowedCancelBeneficiarySrc, (value) =>
+    writer.writeBytes(value),
+  );
+  writer.writeOption(data.order.externalCall, (value) =>
+    writer.writeFixedBytes(value.externalCallShortcut),
+  );
+  writer.writeU64(data.fixFee);
+  writer.writeU64(data.percentFee);
+  return writer.toBuffer();
 }
 
-describe("Log parsing", () => {
+function encodeCreatedOrderIdPayload(orderId: number[]): Buffer {
+  const writer = new BorshWriter();
+  writer.writeFixedBytes(orderId);
+  return writer.toBuffer();
+}
+
+function encodeFulfilledPayload(orderId: number[], taker: number[]): Buffer {
+  const writer = new BorshWriter();
+  writer.writeFixedBytes(orderId);
+  writer.writeFixedBytes(taker);
+  return writer.toBuffer();
+}
+
+describe("Low-level log parsing", () => {
   it("extracts CreatedOrderId from src logs", () => {
     const programId = new PublicKey(config.dln.srcProgramId);
     const orderIdBytes = Array.from(
       { length: 32 },
       (_, index) => (index + 1) % 256,
     );
-    const coder = new BorshCoder(DLN_SRC_IDL);
-    const parser = new EventParser(programId, coder);
-    const base64Event = encodeEvent(DLN_SRC_IDL, "CreatedOrderId", {
-      orderId: orderIdBytes,
-    });
+    const base64Event = encodeEvent(
+      "CreatedOrderId",
+      encodeCreatedOrderIdPayload(orderIdBytes),
+    );
     const logs = buildProgramLogs(programId, base64Event);
-    const events = Array.from(parser.parseLogs(logs));
+    const events = parseProgramEvents(logs, programId.toString());
     const orderId = extractCreatedOrderId(events);
     expect(orderId).to.equal(Buffer.from(orderIdBytes).toString("hex"));
   });
+
   it("extracts Fulfilled orderId from dst logs", () => {
     const programId = new PublicKey(config.dln.dstProgramId);
     const orderIdBytes = Array.from(
       { length: 32 },
       (_, index) => (255 - index) % 256,
     );
-    const coder = new BorshCoder(DLN_DST_IDL);
-    const parser = new EventParser(programId, coder);
-    const base64Event = encodeEvent(DLN_DST_IDL, "Fulfilled", {
-      orderId: orderIdBytes,
-      taker: new PublicKey("11111111111111111111111111111111"),
-    });
+    const takerBytes = Array.from({ length: 32 }, () => 11);
+    const base64Event = encodeEvent(
+      "Fulfilled",
+      encodeFulfilledPayload(orderIdBytes, takerBytes),
+    );
     const logs = buildProgramLogs(programId, base64Event);
-    const events = Array.from(parser.parseLogs(logs));
+    const events = parseProgramEvents(logs, programId.toString());
     const orderId = extractFulfilledOrderId(events);
     expect(orderId).to.equal(Buffer.from(orderIdBytes).toString("hex"));
   });
+
   it("parses CreatedOrder event payload", () => {
     const programId = new PublicKey(config.dln.srcProgramId);
-    const coder = new BorshCoder(DLN_SRC_IDL);
-    const parser = new EventParser(programId, coder);
     const giveToken = Array.from(
       { length: 32 },
       (_, index) => (index + 3) % 256,
@@ -125,9 +170,9 @@ describe("Log parsing", () => {
       { length: 32 },
       (_, index) => (index + 9) % 256,
     );
-    const payload = {
+    const payload: CreatedOrderData = {
       order: {
-        makerOrderNonce: new BN(42),
+        makerOrderNonce: 42n,
         makerSrc: Array.from({ length: 32 }, (_, index) => (index + 11) % 256),
         give: {
           chainId: Array.from({ length: 32 }, (_, index) => (index + 1) % 256),
@@ -155,29 +200,54 @@ describe("Log parsing", () => {
         allowedCancelBeneficiarySrc: null,
         externalCall: null,
       },
-      fixFee: new BN(7),
-      percentFee: new BN(3),
+      fixFee: 7n,
+      percentFee: 3n,
     };
-    const base64Event = encodeEvent(DLN_SRC_IDL, "CreatedOrder", payload);
+    const base64Event = encodeEvent(
+      "CreatedOrder",
+      encodeCreatedOrderPayload(payload),
+    );
     const logs = buildProgramLogs(programId, base64Event);
-    const events = Array.from(parser.parseLogs(logs));
-    const createdEvent = events.find((event) => event.name === "CreatedOrder");
-    expect(createdEvent).to.not.equal(undefined);
-    const data = createdEvent?.data as {
-      order: {
-        makerOrderNonce: BN;
-        give: { tokenAddress: Uint8Array; amount: number[] };
-        take: { tokenAddress: Uint8Array; amount: number[] };
-      };
-      fixFee: BN;
-      percentFee: BN;
-    };
-    expect(data.order.makerOrderNonce.toString()).to.equal("42");
-    expect(Array.from(data.order.give.tokenAddress)).to.deep.equal(giveToken);
-    expect(Array.from(data.order.give.amount)).to.deep.equal(giveAmount);
-    expect(Array.from(data.order.take.tokenAddress)).to.deep.equal(takeToken);
-    expect(Array.from(data.order.take.amount)).to.deep.equal(takeAmount);
-    expect(data.fixFee.toString()).to.equal("7");
-    expect(data.percentFee.toString()).to.equal("3");
+    const events = parseProgramEvents(logs, programId.toString());
+    const data = extractCreatedOrderData(events);
+
+    expect(data).to.not.equal(null);
+    expect(data?.order.makerOrderNonce).to.equal(42n);
+    expect(data?.order.give.tokenAddress).to.deep.equal(giveToken);
+    expect(data?.order.give.amount).to.deep.equal(giveAmount);
+    expect(data?.order.take.tokenAddress).to.deep.equal(takeToken);
+    expect(data?.order.take.amount).to.deep.equal(takeAmount);
+    expect(data?.fixFee).to.equal(7n);
+    expect(data?.percentFee).to.equal(3n);
+  });
+
+  it("keeps only logs emitted by the target program", () => {
+    const targetProgramId = new PublicKey(config.dln.srcProgramId);
+    const foreignProgramId = new PublicKey(config.dln.dstProgramId);
+    const foreignOrderId = Array.from({ length: 32 }, () => 170);
+    const targetOrderId = Array.from({ length: 32 }, () => 187);
+    const foreignEvent = encodeEvent(
+      "CreatedOrderId",
+      encodeCreatedOrderIdPayload(foreignOrderId),
+    );
+    const targetEvent = encodeEvent(
+      "CreatedOrderId",
+      encodeCreatedOrderIdPayload(targetOrderId),
+    );
+    const logs = [
+      `Program ${foreignProgramId.toString()} invoke [1]`,
+      `Program data: ${foreignEvent}`,
+      `Program ${foreignProgramId.toString()} success`,
+      `Program ${targetProgramId.toString()} invoke [1]`,
+      `Program data: ${targetEvent}`,
+      `Program ${targetProgramId.toString()} success`,
+    ];
+
+    const events = parseProgramEvents(logs, targetProgramId.toString());
+
+    expect(events).to.have.length(1);
+    expect(extractCreatedOrderId(events)).to.equal(
+      Buffer.from(targetOrderId).toString("hex"),
+    );
   });
 });
