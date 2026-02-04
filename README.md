@@ -100,7 +100,8 @@ bun format:check     # Check code formatting
 │                                 INDEXER                                      │
 │  ┌────────────────┐  ┌────────────────┐  ┌────────────────────────────────┐ │
 │  │  Solana RPC    │  │    Parser      │  │        Price Enrichment        │ │
-│  │  (rate-limited)│→ │  (Anchor IDL)  │→ │  Jupiter API + DLN API         │ │
+│  │  (rate-limited)│→ │ (Low-level     │→ │  Jupiter API + DLN API         │ │
+│  │                │  │  Borsh parser) │  │                                │ │
 │  └────────────────┘  └────────────────┘  └────────────────────────────────┘ │
 │           │                                           │                      │
 │           │              BIDIRECTIONAL                │                      │
@@ -130,11 +131,13 @@ bun format:check     # Check code formatting
                                             └─────────────────────────────────┘
 ```
 
+Parser note: the indexer uses an in-house low-level parser that manually decodes DLN event payloads with Borsh primitives (no Anchor `EventParser`/IDL runtime in the indexer path).
+
 ### Components
 
 | Component     | Technology              | Description                                                            |
 | ------------- | ----------------------- | ---------------------------------------------------------------------- |
-| **Indexer**   | TypeScript + Bun        | Fetches transactions, parses DLN events, enriches with USD prices      |
+| **Indexer**   | TypeScript + Bun        | Fetches transactions, parses DLN events with a low-level Borsh parser, enriches with USD prices |
 | **API**       | Hono                    | REST API serving aggregated volume data                                |
 | **Dashboard** | React + Vite + Recharts | Interactive visualization of daily volumes and order counts            |
 | **Storage**   | ClickHouse              | Analytics-optimized database with ReplacingMergeTree for deduplication |
