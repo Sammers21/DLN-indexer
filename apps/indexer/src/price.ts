@@ -76,7 +76,11 @@ export async function getTokenPrice(mint: string): Promise<number | null> {
       });
       clearTimeout(timeout);
       if (response.status === 429) {
-        apiRequests.inc({ dest: "jupiter", endpoint: "price", status: "rate_limited" });
+        apiRequests.inc({
+          dest: "jupiter",
+          endpoint: "price",
+          status: "rate_limited",
+        });
         const delay = RETRY_DELAY_MS * Math.pow(2, attempt);
         logger.debug(
           { mint, attempt, delay },
@@ -86,7 +90,11 @@ export async function getTokenPrice(mint: string): Promise<number | null> {
         continue;
       }
       if (!response.ok) {
-        apiRequests.inc({ dest: "jupiter", endpoint: "price", status: "error" });
+        apiRequests.inc({
+          dest: "jupiter",
+          endpoint: "price",
+          status: "error",
+        });
         logger.warn({ status: response.status, mint }, "Jupiter API error");
         return null;
       }
@@ -96,7 +104,11 @@ export async function getTokenPrice(mint: string): Promise<number | null> {
       >;
       const usdPrice = data[mint]?.usdPrice;
       if (usdPrice !== undefined) {
-        apiRequests.inc({ dest: "jupiter", endpoint: "price", status: "success" });
+        apiRequests.inc({
+          dest: "jupiter",
+          endpoint: "price",
+          status: "success",
+        });
         const price = usdPrice;
         // Cache in Redis
         if (redisClient) {
@@ -105,7 +117,11 @@ export async function getTokenPrice(mint: string): Promise<number | null> {
         logger.debug({ mint, price }, "Fetched token price from Jupiter");
         return price;
       }
-      apiRequests.inc({ dest: "jupiter", endpoint: "price", status: "no_data" });
+      apiRequests.inc({
+        dest: "jupiter",
+        endpoint: "price",
+        status: "no_data",
+      });
       return null;
     } catch (err) {
       lastError = err;

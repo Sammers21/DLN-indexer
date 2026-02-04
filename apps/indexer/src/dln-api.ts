@@ -104,7 +104,11 @@ export async function getUsdValueFromDlnApi(
         return okResult(usdValue);
       }
       if (response.status === 404) {
-        apiRequests.inc({ dest: "dln", endpoint: "orders", status: "not_found" });
+        apiRequests.inc({
+          dest: "dln",
+          endpoint: "orders",
+          status: "not_found",
+        });
         logger.error(
           { orderId: orderId.slice(0, 16) },
           "Order not found in DLN API",
@@ -112,7 +116,11 @@ export async function getUsdValueFromDlnApi(
         return errorResult("order_not_found");
       }
       if (response.status === 429 && attempt < MAX_RETRIES) {
-        apiRequests.inc({ dest: "dln", endpoint: "orders", status: "rate_limited" });
+        apiRequests.inc({
+          dest: "dln",
+          endpoint: "orders",
+          status: "rate_limited",
+        });
         logger.warn(
           { orderId: orderId.slice(0, 16), attempt, delayMs },
           "DLN API rate limited, retrying...",

@@ -68,7 +68,11 @@ export class SolanaClient {
           const result = await fn();
           const timeMs = Date.now() - start;
           this.recordMetrics(name, timeMs, false);
-          apiRequests.inc({ dest: "solana", endpoint: name, status: "success" });
+          apiRequests.inc({
+            dest: "solana",
+            endpoint: name,
+            status: "success",
+          });
           return { result, timeMs };
         } catch (err) {
           lastError = err as Error;
