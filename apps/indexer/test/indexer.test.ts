@@ -245,12 +245,7 @@ describe("Indexer", () => {
       const mockSolana = {
         getTransactions: async () => [],
       } as unknown as SolanaClient;
-      const indexer = new Indexer(
-        mockSolana,
-        store,
-        analytics,
-        "OrderCreated",
-      );
+      const indexer = new Indexer(mockSolana, store, analytics, "OrderCreated");
       const internal = indexer as unknown as {
         processBatch: (
           sigs: ConfirmedSignatureInfo[],

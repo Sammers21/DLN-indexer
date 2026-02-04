@@ -161,6 +161,17 @@ body {
   font-variant-numeric: tabular-nums;
   color: var(--text);
 }
+.card-metrics {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.card-metric--count {
+  font-size: 0.85rem;
+  color: var(--muted);
+  background: rgba(148, 163, 184, 0.12);
+}
 .chart-container {
   flex: 1;
   min-height: 0;

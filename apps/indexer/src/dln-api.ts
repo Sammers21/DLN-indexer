@@ -1,7 +1,7 @@
 import { createLogger, type PricingStatus } from "@dln/shared";
 import Bottleneck from "bottleneck";
-import { getTokenPrice, getTokenDecimals, calculateUsdValue } from "./price";
-import { apiRequests } from "./metrics";
+import { getTokenPrice, getTokenDecimals, calculateUsdValue } from "./price.js";
+import { apiRequests } from "./metrics.js";
 
 const logger = createLogger("dln-api");
 

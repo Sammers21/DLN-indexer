@@ -20,8 +20,8 @@ import {
   ProgramType,
 } from "./checkpoint";
 import { SolanaClient } from "./solana";
-import { getUsdValue } from "./price";
-import { getUsdValueFromDlnApi } from "./dln-api";
+import { getUsdValue } from "./price.js";
+import { getUsdValueFromDlnApi } from "./dln-api.js";
 import { extractCreatedOrderId, extractFulfilledOrderId } from "./parser";
 
 const logger = createLogger("indexer");

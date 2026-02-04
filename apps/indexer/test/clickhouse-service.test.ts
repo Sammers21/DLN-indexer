@@ -217,8 +217,12 @@ describe("Clickhouse service", () => {
       const ch = new Clickhouse("http://localhost:8123");
       const { queryCalls } = mockClient(ch);
       await ch.getDailyVolume({ eventType: "created", from: "2024-03-01" });
-      expect(queryCalls[0].query).to.include("toDate(block_time) >= {from:Date}");
-      expect(queryCalls[0].query).to.not.include("toDate(block_time) <= {to:Date}");
+      expect(queryCalls[0].query).to.include(
+        "toDate(block_time) >= {from:Date}",
+      );
+      expect(queryCalls[0].query).to.not.include(
+        "toDate(block_time) <= {to:Date}",
+      );
       expect(queryCalls[0].params!.from).to.equal("2024-03-01");
     });
 
@@ -226,7 +230,9 @@ describe("Clickhouse service", () => {
       const ch = new Clickhouse("http://localhost:8123");
       const { queryCalls } = mockClient(ch);
       await ch.getDailyVolume({ eventType: "fulfilled", to: "2024-06-30" });
-      expect(queryCalls[0].query).to.not.include("toDate(block_time) >= {from:Date}");
+      expect(queryCalls[0].query).to.not.include(
+        "toDate(block_time) >= {from:Date}",
+      );
       expect(queryCalls[0].query).to.include("toDate(block_time) <= {to:Date}");
       expect(queryCalls[0].params!.to).to.equal("2024-06-30");
     });

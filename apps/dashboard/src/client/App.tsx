@@ -25,6 +25,10 @@ function sumVolumeUsd(rows: VolumeRow[]): number {
   return rows.reduce((sum, row) => sum + row.volume_usd, 0);
 }
 
+function sumOrderCount(rows: VolumeRow[]): number {
+  return rows.reduce((sum, row) => sum + row.order_count, 0);
+}
+
 function maxVolumeUsd(rows: VolumeRow[]): number {
   return rows.reduce(
     (max, row) => (row.volume_usd > max ? row.volume_usd : max),
@@ -61,6 +65,14 @@ function App() {
     () => sumVolumeUsd(fulfilledVolumes),
     [fulfilledVolumes],
   );
+  const createdOrderCount = useMemo(
+    () => sumOrderCount(createdVolumes),
+    [createdVolumes],
+  );
+  const fulfilledOrderCount = useMemo(
+    () => sumOrderCount(fulfilledVolumes),
+    [fulfilledVolumes],
+  );
   const yDomain = useMemo((): [number, number | "auto"] => {
     const max = Math.max(
       maxVolumeUsd(createdVolumes),
@@ -72,7 +84,10 @@ function App() {
   // Fetch date range on mount to set defaults
   useEffect(() => {
     fetch("/api/default_range")
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) throw new Error(`API error: ${res.status}`);
+        return res.json();
+      })
       .then((data: { from: string; to: string }) => {
         if (data.from && data.to) {
           setStartDate(toDateInput(data.from));
@@ -80,7 +95,10 @@ function App() {
         }
         setRangeLoaded(true);
       })
-      .catch(() => setRangeLoaded(true));
+      .catch((err) => {
+        setError(`Failed to connect to API: ${err.message}`);
+        setRangeLoaded(true);
+      });
   }, []);
   const fetchData = useCallback(async () => {
     if (!rangeLoaded) return;
@@ -153,7 +171,12 @@ function App() {
               <span className="indicator indicator--created" />
               <h2>Created Order Volume</h2>
             </div>
-            <div className="card-metric">{formatUsd(createdTotalUsd)}</div>
+            <div className="card-metrics">
+              <div className="card-metric">{formatUsd(createdTotalUsd)}</div>
+              <div className="card-metric card-metric--count">
+                {createdOrderCount.toLocaleString()} orders
+              </div>
+            </div>
           </div>
           <div className="chart-container">
             {loading ? (
@@ -226,7 +249,12 @@ function App() {
               <span className="indicator indicator--fulfilled" />
               <h2>Fulfilled Order Volume</h2>
             </div>
-            <div className="card-metric">{formatUsd(fulfilledTotalUsd)}</div>
+            <div className="card-metrics">
+              <div className="card-metric">{formatUsd(fulfilledTotalUsd)}</div>
+              <div className="card-metric card-metric--count">
+                {fulfilledOrderCount.toLocaleString()} orders
+              </div>
+            </div>
           </div>
           <div className="chart-container">
             {loading ? (

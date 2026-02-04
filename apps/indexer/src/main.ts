@@ -1,10 +1,10 @@
 import http from "node:http";
 import { config, createLogger, Clickhouse } from "@dln/shared";
-import { Indexer } from "./indexer";
-import { SolanaClient } from "./solana";
-import { Redis } from "./storage";
-import { setPriceCache } from "./price";
-import { registry } from "./metrics";
+import { Indexer } from "./indexer.js";
+import { SolanaClient } from "./solana.js";
+import { Redis } from "./storage/index.js";
+import { setPriceCache } from "./price.js";
+import { registry } from "./metrics.js";
 
 const logger = createLogger("indexer");
 
@@ -17,9 +17,31 @@ async function main(): Promise<void> {
   setPriceCache(redis);
   const srcIndexer = new Indexer(solana, redis, clickhouse, "OrderCreated");
   const dstIndexer = new Indexer(solana, redis, clickhouse, "OrderFulfilled");
+
+  // Track indexing promises for graceful shutdown
+  let srcIndexingPromise: Promise<void> | null = null;
+  let dstIndexingPromise: Promise<void> | null = null;
+  let isShuttingDown = false;
+
   async function shutdown(code: number): Promise<void> {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+    logger.info("Initiating graceful shutdown...");
+
+    // Signal indexers to stop
     await Promise.all([srcIndexer.stop(), dstIndexer.stop()]);
+
+    // Wait for in-flight indexing operations to complete
+    if (srcIndexingPromise || dstIndexingPromise) {
+      logger.info("Waiting for in-flight indexing operations to complete...");
+      await Promise.allSettled(
+        [srcIndexingPromise, dstIndexingPromise].filter(Boolean),
+      );
+    }
+
+    // Close connections
     await Promise.all([clickhouse.close(), redis.close()]);
+    logger.info("Shutdown complete");
     process.exit(code);
   }
   process.on("SIGINT", () => shutdown(0));
@@ -39,12 +61,13 @@ async function main(): Promise<void> {
   metricsServer.listen(metricsPort);
   logger.info({ port: metricsPort }, "Indexer metrics server started");
   try {
-    const srcIndexing = srcIndexer.startIndexing();
-    const dstIndexing = dstIndexer.startIndexing();
+    srcIndexingPromise = srcIndexer.startIndexing();
+    dstIndexingPromise = dstIndexer.startIndexing();
     // Monitor progress
     const monitor = async (): Promise<void> => {
-      while (true) {
+      while (!isShuttingDown) {
         await new Promise((resolve) => setTimeout(resolve, 10000));
+        if (isShuttingDown) break;
         const [created, fulfilled] = await Promise.all([
           clickhouse.getOrderCount("OrderCreated"),
           clickhouse.getOrderCount("OrderFulfilled"),
@@ -56,7 +79,7 @@ async function main(): Promise<void> {
         }
       }
     };
-    await Promise.race([srcIndexing, dstIndexing, monitor()]);
+    await Promise.race([srcIndexingPromise, dstIndexingPromise, monitor()]);
   } catch (err) {
     logger.error({ err }, "Failed to start DLN Indexer");
     await shutdown(1);
