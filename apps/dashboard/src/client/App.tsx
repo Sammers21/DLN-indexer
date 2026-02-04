@@ -7,7 +7,12 @@ import {
   ResponsiveContainer,
   BarChart,
   Bar,
+  TooltipProps,
 } from "recharts";
+import {
+  ValueType,
+  NameType,
+} from "recharts/types/component/DefaultTooltipContent";
 
 interface VolumeRow {
   period: string;
@@ -19,6 +24,32 @@ function formatUsd(value: number): string {
   if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(2)}M`;
   if (value >= 1_000) return `$${(value / 1_000).toFixed(2)}K`;
   return `$${value.toFixed(2)}`;
+}
+
+function CustomTooltip({
+  active,
+  payload,
+  label,
+}: TooltipProps<ValueType, NameType>) {
+  if (!active || !payload || payload.length === 0) return null;
+  const data = payload[0].payload as VolumeRow;
+  return (
+    <div
+      style={{
+        background: "rgba(15, 23, 42, 0.92)",
+        border: "1px solid rgba(148, 163, 184, 0.25)",
+        borderRadius: 12,
+        padding: "10px 14px",
+        color: "#e2e8f0",
+      }}
+    >
+      <div style={{ fontWeight: 600, marginBottom: 6 }}>{label}</div>
+      <div style={{ marginBottom: 4 }}>
+        Volume: {formatUsd(data.volume_usd)}
+      </div>
+      <div>Orders: {data.order_count.toLocaleString()}</div>
+    </div>
+  );
 }
 
 function sumVolumeUsd(rows: VolumeRow[]): number {
@@ -222,17 +253,7 @@ function App() {
                     tickCount={6}
                     width={72}
                   />
-                  <Tooltip
-                    formatter={(value?: number) => formatUsd(value ?? 0)}
-                    labelStyle={{ fontWeight: 600 }}
-                    contentStyle={{
-                      background: "rgba(15, 23, 42, 0.92)",
-                      border: "1px solid rgba(148, 163, 184, 0.25)",
-                      borderRadius: 12,
-                      color: "#e2e8f0",
-                    }}
-                    itemStyle={{ color: "#e2e8f0" }}
-                  />
+                  <Tooltip content={<CustomTooltip />} />
                   <Bar
                     dataKey="volume_usd"
                     fill="url(#createdGradient)"
@@ -296,17 +317,7 @@ function App() {
                     tickCount={6}
                     width={72}
                   />
-                  <Tooltip
-                    formatter={(value?: number) => formatUsd(value ?? 0)}
-                    labelStyle={{ fontWeight: 600 }}
-                    contentStyle={{
-                      background: "rgba(15, 23, 42, 0.92)",
-                      border: "1px solid rgba(148, 163, 184, 0.25)",
-                      borderRadius: 12,
-                      color: "#e2e8f0",
-                    }}
-                    itemStyle={{ color: "#e2e8f0" }}
-                  />
+                  <Tooltip content={<CustomTooltip />} />
                   <Bar
                     dataKey="volume_usd"
                     fill="url(#fulfilledGradient)"

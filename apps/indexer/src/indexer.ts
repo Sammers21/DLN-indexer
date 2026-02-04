@@ -368,8 +368,8 @@ export class Indexer {
       this.lastCheckpointSaveTime = now;
       logger.info(
         `${this.kind} checkpoint saved [${direction}]: ` +
-        `from=${this.checkpoint.from.signature.slice(0, 16)}... (${formatTime(this.checkpoint.from.blockTime)}), ` +
-        `to=${this.checkpoint.to.signature.slice(0, 16)}... (${formatTime(this.checkpoint.to.blockTime)})`,
+          `from=${this.checkpoint.from.signature.slice(0, 16)}... (${formatTime(this.checkpoint.from.blockTime)}), ` +
+          `to=${this.checkpoint.to.signature.slice(0, 16)}... (${formatTime(this.checkpoint.to.blockTime)})`,
       );
     }
   }

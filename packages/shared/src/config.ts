@@ -24,39 +24,70 @@ function requireEnv(name: string): string {
   if (!value) {
     throw new Error(
       `Missing required environment variable: ${name}. ` +
-        `Copy .env.example to .env and fill in the values.`,
+      `Copy .env.example to .env and fill in the values.`,
     );
   }
   return value;
 }
 
+function getEnvOrDefault(name: string, defaultValue: string): string {
+  return process.env[name] || defaultValue;
+}
+
 export const config = {
   solana: {
-    rpcUrl: process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com",
-    rps: parseInt(process.env.SOLANA_RPS || "10", 10),
+    get rpcUrl() {
+      return getEnvOrDefault(
+        "SOLANA_RPC_URL",
+        "https://api.mainnet-beta.solana.com",
+      );
+    },
+    get rps() {
+      return parseInt(getEnvOrDefault("SOLANA_RPS", "10"), 10);
+    },
   },
   clickhouse: {
-    host: process.env.CLICKHOUSE_HOST || "http://localhost:8123",
-    database: process.env.CLICKHOUSE_DATABASE || "dln",
-    username: process.env.CLICKHOUSE_USER || "dln_admin",
-    password: requireEnv("CLICKHOUSE_PASSWORD"),
+    get host() {
+      return getEnvOrDefault("CLICKHOUSE_HOST", "http://localhost:8123");
+    },
+    get database() {
+      return getEnvOrDefault("CLICKHOUSE_DATABASE", "dln");
+    },
+    get username() {
+      return getEnvOrDefault("CLICKHOUSE_USER", "dln_admin");
+    },
+    get password() {
+      return requireEnv("CLICKHOUSE_PASSWORD");
+    },
   },
   redis: {
-    url: requireEnv("REDIS_URL"),
+    get url() {
+      return requireEnv("REDIS_URL");
+    },
   },
   api: {
-    port: parseInt(process.env.API_PORT || "3000", 10),
-    host: process.env.API_HOST || "0.0.0.0",
+    get port() {
+      return parseInt(getEnvOrDefault("API_PORT", "3000"), 10);
+    },
+    get host() {
+      return getEnvOrDefault("API_HOST", "0.0.0.0");
+    },
   },
   indexer: {
-    batchSize: parseInt(process.env.INDEXER_BATCH_SIZE || "50", 10),
-    delayMs: parseInt(process.env.INDEXER_DELAY_MS || "10000", 10),
+    get batchSize() {
+      return parseInt(getEnvOrDefault("INDEXER_BATCH_SIZE", "50"), 10);
+    },
+    get delayMs() {
+      return parseInt(getEnvOrDefault("INDEXER_DELAY_MS", "10000"), 10);
+    },
   },
   dln: {
     srcProgramId: "src5qyZHqTqecJV4aY6Cb6zDZLMDzrDKKezs22MPHr4",
     dstProgramId: "dst5MGcFPoBeREFAA5E3tU5ij8m5uVYwkzkSAbsLbNo",
   },
   jupiter: {
-    apiKey: process.env.JUPITER_API_KEY || "",
+    get apiKey() {
+      return getEnvOrDefault("JUPITER_API_KEY", "");
+    },
   },
-} as const;
+};
