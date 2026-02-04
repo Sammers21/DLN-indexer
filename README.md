@@ -135,13 +135,13 @@ Parser note: the indexer uses an in-house low-level parser that manually decodes
 
 ### Components
 
-| Component     | Technology              | Description                                                            |
-| ------------- | ----------------------- | ---------------------------------------------------------------------- |
+| Component     | Technology              | Description                                                                                     |
+| ------------- | ----------------------- | ----------------------------------------------------------------------------------------------- |
 | **Indexer**   | TypeScript + Bun        | Fetches transactions, parses DLN events with a low-level Borsh parser, enriches with USD prices |
-| **API**       | Hono                    | REST API serving aggregated volume data                                |
-| **Dashboard** | React + Vite + Recharts | Interactive visualization of daily volumes and order counts            |
-| **Storage**   | ClickHouse              | Analytics-optimized database with ReplacingMergeTree for deduplication |
-| **Cache**     | Redis                   | Stores indexer checkpoints (db0) and price cache with 10min TTL (db1)  |
+| **API**       | Hono                    | REST API serving aggregated volume data                                                         |
+| **Dashboard** | React + Vite + Recharts | Interactive visualization of daily volumes and order counts                                     |
+| **Storage**   | ClickHouse              | Analytics-optimized database with ReplacingMergeTree for deduplication                          |
+| **Cache**     | Redis                   | Stores indexer checkpoints (db0) and price cache with 10min TTL (db1)                           |
 
 ### DLN Programs Indexed
 
